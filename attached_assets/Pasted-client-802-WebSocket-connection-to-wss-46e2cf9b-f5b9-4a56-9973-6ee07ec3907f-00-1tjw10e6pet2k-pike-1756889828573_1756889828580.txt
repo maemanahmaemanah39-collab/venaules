@@ -1,0 +1,38 @@
+client:802 WebSocket connection to 'wss://46e2cf9b-f5b9-4a56-9973-6ee07ec3907f-00-1tjw10e6pet2k.pike.replit.dev:5000/?token=p3b2UHaN73QD' failed: Error during WebSocket handshake: Unexpected response code: 502
+createConnection @ client:802
+client:841 [vite] failed to connect to websocket (Error: WebSocket closed without opened.). 
+connect @ client:841
+client:454 Uncaught (in promise) Error: WebSocket closed without opened.
+    at WebSocket.<anonymous> (client:454:22)
+chunk-AP7X3ANE.js?v=feda5346:21565 Download the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+chunk-AP7X3ANE.js?v=feda5346:1233 Error: <svg> attribute viewBox: Unexpected end of attribute. Expected number, "0 0 24".
+setValueForProperty @ chunk-AP7X3ANE.js?v=feda5346:1233
+Show 1 more frame
+Show less
+chunk-AP7X3ANE.js?v=feda5346:1233 Error: <svg> attribute viewBox: Unexpected end of attribute. Expected number, "0 0 24".
+setValueForProperty @ chunk-AP7X3ANE.js?v=feda5346:1233
+Show 1 more frame
+Show less
+chunk-AP7X3ANE.js?v=feda5346:1233 Error: <svg> attribute viewBox: Unexpected end of attribute. Expected number, "0 0 24".
+setValueForProperty @ chunk-AP7X3ANE.js?v=feda5346:1233
+Show 1 more frame
+Show less
+uhupflztvguurftagzit.supabase.co/rest/v1/profiles?select=*&id=eq.550e8400-e29b-41d4-a716-446655440010:1 
+        
+        
+       Failed to load resource: the server responded with a status of 406 ()
+uhupflztvguurftagzit.supabase.co/rest/v1/profiles?select=*&id=eq.550e8400-e29b-41d4-a716-446655440010:1 
+        
+        
+       Failed to load resource: the server responded with a status of 406 ()
+uhupflztvguurftagzit.supabase.co/auth/v1/token?grant_type=password:1 
+        
+        
+       Failed to load resource: the server responded with a status of 400 ()
+Login.tsx:61 Login error: AuthApiError: Invalid login credentials
+    at handleError2 (@supabase_supabase-js.js?v=feda5346:4909:9)
+    at async _handleRequest2 (@supabase_supabase-js.js?v=feda5346:4950:5)
+    at async _request (@supabase_supabase-js.js?v=feda5346:4934:16)
+    at async SupabaseAuthClient.signInWithPassword (@supabase_supabase-js.js?v=feda5346:5735:15)
+    at async SupabaseService.signIn (supabaseService.ts:46:29)
+    at async handleSubmit (Login.tsx:48:28)
