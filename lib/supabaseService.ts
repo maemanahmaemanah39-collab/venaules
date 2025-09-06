@@ -435,6 +435,16 @@ class SupabaseService {
     return data?.map(this.mapProjectFromDB) || []
   }
 
+  static async getProjectsByFreelancerId(freelancerId: string): Promise<Project[]> {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .contains('team', [{ memberId: freelancerId }])
+
+    if (error) throw error
+    return data?.map(this.mapProjectFromDB) || []
+  }
+
   // Similar methods for all other entities...
   // Team Members
   static async getTeamMembers(): Promise<TeamMember[]> {
@@ -469,6 +479,17 @@ class SupabaseService {
   static async deleteTeamMember(id: string): Promise<void> {
     const { error } = await supabase.from('team_members').delete().eq('id', id)
     if (error) throw error
+  }
+
+  static async getFreelancerByPortalId(portalId: string): Promise<TeamMember | null> {
+    const { data, error } = await supabase
+      .from('team_members')
+      .select('*')
+      .eq('portal_access_id', portalId)
+      .single()
+
+    if (error && error.code !== 'PGRST116') throw error
+    return data ? this.mapTeamMemberFromDB(data) : null
   }
 
   // Continue with other entities (Transactions, Cards, etc.)
@@ -915,6 +936,16 @@ class SupabaseService {
     if (error) throw error
   }
 
+  static async getTeamProjectPaymentsByFreelancerId(freelancerId: string): Promise<TeamProjectPayment[]> {
+    const { data, error } = await supabase
+      .from('team_project_payments')
+      .select('*')
+      .eq('team_member_id', freelancerId)
+
+    if (error) throw error
+    return data?.map(this.mapTeamProjectPaymentFromDB) || []
+  }
+
   // Team Payment Records
   static async getTeamPaymentRecords(): Promise<TeamPaymentRecord[]> {
     const { data, error } = await supabase.from('team_payment_records').select('*')
@@ -983,6 +1014,16 @@ class SupabaseService {
   static async deleteRewardLedgerEntry(id: string): Promise<void> {
     const { error } = await supabase.from('reward_ledger_entries').delete().eq('id', id)
     if (error) throw error
+  }
+
+  static async getRewardLedgerEntriesByFreelancerId(freelancerId: string): Promise<RewardLedgerEntry[]> {
+    const { data, error } = await supabase
+      .from('reward_ledger_entries')
+      .select('*')
+      .eq('team_member_id', freelancerId)
+
+    if (error) throw error
+    return data?.map(this.mapRewardLedgerEntryFromDB) || []
   }
 
   // Helper mapping functions for database field name conversions

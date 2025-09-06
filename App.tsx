@@ -291,7 +291,7 @@ const App: React.FC = () => {
   if (route.startsWith('#/public-booking')) return <PublicBookingForm showNotification={showNotification} addNotification={addNotification} />;
   if (route.startsWith('#/public-lead-form')) return <PublicLeadForm showNotification={showNotification} addNotification={addNotification} />;
   if (route.startsWith('#/feedback')) return <PublicFeedbackForm />;
-  if (route.startsWith('#/suggestion-form')) return <SuggestionForm />;
+  if (route.startsWith('#/suggestion-form')) return <SuggestionForm showNotification={showNotification} />;
   if (route.startsWith('#/revision-form')) return <PublicRevisionForm />;
   if (route.startsWith('#/portal/')) {
     const accessId = route.split('/portal/')[1];
@@ -299,7 +299,7 @@ const App: React.FC = () => {
   }
   if (route.startsWith('#/freelancer-portal/')) {
      const accessId = route.split('/freelancer-portal/')[1];
-     return <FreelancerPortal accessId={accessId} showNotification={showNotification} addNotification={addNotification} />;
+     return <FreelancerPortal accessId={accessId} showNotification={showNotification} />;
   }
 
   if (authLoading) {
