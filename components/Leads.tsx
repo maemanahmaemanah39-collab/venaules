@@ -335,30 +335,71 @@ const LeadCard: React.FC<{
 // --- Main Component ---
 
 interface LeadsProps {
-    leads: Lead[];
-    setLeads: React.Dispatch<React.SetStateAction<Lead[]>>;
-    clients: Client[];
-    setClients: React.Dispatch<React.SetStateAction<Client[]>>;
-    projects: Project[];
-    setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
-    packages: Package[];
-    addOns: AddOn[];
-    transactions: Transaction[];
-    setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
-    userProfile: Profile;
-    setProfile: React.Dispatch<React.SetStateAction<Profile>>;
+    // This component will fetch its own data.
     showNotification: (message: string) => void;
-    cards: Card[];
-    setCards: React.Dispatch<React.SetStateAction<Card[]>>;
-    pockets: FinancialPocket[];
-    setPockets: React.Dispatch<React.SetStateAction<FinancialPocket[]>>;
-    promoCodes: PromoCode[];
-    setPromoCodes: React.Dispatch<React.SetStateAction<PromoCode[]>>;
 }
 
-export const Leads: React.FC<LeadsProps> = ({
-    leads, setLeads, clients, setClients, projects, setProjects, packages, addOns, transactions, setTransactions, userProfile, setProfile, showNotification, cards, setCards, pockets, setPockets, promoCodes, setPromoCodes
-}) => {
+export const Leads: React.FC<LeadsProps> = ({ showNotification }) => {
+    const [leads, setLeads] = useState<Lead[]>([]);
+    const [clients, setClients] = useState<Client[]>([]);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [addOns, setAddOns] = useState<AddOn[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [userProfile, setProfile] = useState<Profile | null>(null);
+    const [cards, setCards] = useState<Card[]>([]);
+    const [pockets, setPockets] = useState<FinancialPocket[]>([]);
+    const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const [
+                    leadsData,
+                    clientsData,
+                    projectsData,
+                    packagesData,
+                    addOnsData,
+                    transactionsData,
+                    profileData,
+                    cardsData,
+                    pocketsData,
+                    promoCodesData,
+                ] = await Promise.all([
+                    SupabaseService.getLeads(),
+                    SupabaseService.getClients(),
+                    SupabaseService.getProjects(),
+                    SupabaseService.getPackages(),
+                    SupabaseService.getAddOns(),
+                    SupabaseService.getTransactions(),
+                    SupabaseService.getProfile(),
+                    SupabaseService.getCards(),
+                    SupabaseService.getPockets(),
+                    SupabaseService.getPromoCodes(),
+                ]);
+
+                setLeads(leadsData);
+                setClients(clientsData);
+                setProjects(projectsData);
+                setPackages(packagesData);
+                setAddOns(addOnsData);
+                setTransactions(transactionsData);
+                setProfile(profileData[0] || null);
+                setCards(cardsData);
+                setPockets(pocketsData);
+                setPromoCodes(promoCodesData);
+            } catch (error) {
+                console.error("Error fetching leads data:", error);
+                showNotification("Gagal memuat data. Silakan coba lagi.");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, []);
     const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalMode, setModalMode] = useState<'add' | 'edit' | 'convert'>('add');
@@ -373,6 +414,20 @@ export const Leads: React.FC<LeadsProps> = ({
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
     const [shareModalState, setShareModalState] = useState<{type: 'package' | 'booking', lead: Lead} | null>(null);
+
+    if (loading || !userProfile) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="text-center">
+                    <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="mt-4 text-brand-text-secondary">Memuat data prospek...</p>
+                </div>
+            </div>
+        );
+    }
 
     const publicLeadFormUrl = useMemo(() => `${window.location.origin}${window.location.pathname}#/public-lead-form/VEN001`, []);
     const publicBookingFormUrl = useMemo(() => `${window.location.origin}${window.location.pathname}#/public-booking/VEN001`, []);
@@ -423,25 +478,39 @@ export const Leads: React.FC<LeadsProps> = ({
 
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => e.preventDefault();
 
+    const updateLeadStatus = async (leadId: string, newStatus: LeadStatus) => {
+        try {
+            const updatedLead = await SupabaseService.updateLead(leadId, { status: newStatus, date: new Date().toISOString() });
+            setLeads(prev => prev.map(l => l.id === leadId ? updatedLead : l));
+            showNotification(`Status prospek diperbarui menjadi "${newStatus}".`);
+        } catch (error) {
+            console.error("Error updating lead status:", error);
+            showNotification("Gagal memperbarui status prospek.");
+        }
+    };
+
     const handleDrop = (e: React.DragEvent<HTMLDivElement>, newStatus: LeadStatus) => {
         e.preventDefault();
         const leadId = e.dataTransfer.getData("leadId");
         const leadToUpdate = leads.find(l => l.id === leadId);
+        setDraggedLeadId(null);
 
         if (leadToUpdate && leadToUpdate.status !== newStatus) {
             if (newStatus === LeadStatus.CONVERTED) {
                 handleOpenModal('convert', leadToUpdate);
             } else {
-                setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus, date: new Date().toISOString() } : l));
+                updateLeadStatus(leadId, newStatus);
             }
         }
-        setDraggedLeadId(null);
     };
 
     const handleNextStatus = (leadId: string, currentStatus: LeadStatus) => {
         let newStatus: LeadStatus | null = null;
-        if (currentStatus === LeadStatus.DISCUSSION) newStatus = LeadStatus.FOLLOW_UP;
-        if (currentStatus === LeadStatus.FOLLOW_UP) newStatus = LeadStatus.CONVERTED;
+        if (currentStatus === LeadStatus.DISCUSSION) {
+            newStatus = LeadStatus.FOLLOW_UP;
+        } else if (currentStatus === LeadStatus.FOLLOW_UP) {
+            newStatus = LeadStatus.CONVERTED;
+        }
 
         if (newStatus) {
             const lead = leads.find(l => l.id === leadId);
@@ -449,8 +518,7 @@ export const Leads: React.FC<LeadsProps> = ({
             if (newStatus === LeadStatus.CONVERTED) {
                 handleOpenModal('convert', lead);
             } else {
-                setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus, date: new Date().toISOString() } : l));
-                showNotification(`Prospek "${lead.name}" dipindahkan ke "${newStatus}".`);
+                updateLeadStatus(leadId, newStatus);
             }
         }
     };
@@ -486,9 +554,9 @@ export const Leads: React.FC<LeadsProps> = ({
     
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (modalMode === 'add' || modalMode === 'edit') {
-            try {
-                const leadData = { ...formData, id: modalMode === 'add' ? `LEAD-${Date.now()}` : selectedLead!.id };
+        try {
+            if (modalMode === 'add' || modalMode === 'edit') {
+                const { id, ...leadData } = formData;
                 if (modalMode === 'add') {
                     const createdLead = await SupabaseService.createLead(leadData);
                     setLeads(prev => [createdLead, ...prev]);
@@ -498,51 +566,74 @@ export const Leads: React.FC<LeadsProps> = ({
                     setLeads(prev => prev.map(l => l.id === selectedLead!.id ? updatedLead : l));
                     showNotification('Prospek berhasil diperbarui.');
                 }
-            } catch (error) {
-                console.error('Error saving lead:', error);
-                alert('Gagal menyimpan prospek. Silakan coba lagi.');
-                return;
-            }
-        } else if (modalMode === 'convert' && selectedLead) {
-            const selectedPackage = packages.find(p => p.id === formData.packageId);
-            if (!selectedPackage) { alert('Harap pilih paket.'); return; }
-            const selectedAddOns = addOns.filter(addon => formData.selectedAddOnIds.includes(addon.id));
-            const totalBeforeDiscount = selectedPackage.price + selectedAddOns.reduce((sum, addon) => sum + addon.price, 0);
-            let finalDiscountAmount = 0;
-            const promoCode = promoCodes.find(p => p.id === formData.promoCodeId);
-            if (promoCode) {
-                if (promoCode.discountType === 'percentage') { finalDiscountAmount = (totalBeforeDiscount * promoCode.discountValue) / 100; } 
-                else { finalDiscountAmount = promoCode.discountValue; }
-            }
-            const totalProject = totalBeforeDiscount - finalDiscountAmount;
-            const dpAmount = Number(formData.dp) || 0;
-            const newClientId = `CLI${Date.now()}`;
-            const newClient: Client = {
-                id: newClientId, name: formData.clientName, email: formData.email, phone: formData.phone, whatsapp: formData.whatsapp,
-                instagram: '', clientType: ClientType.DIRECT, since: new Date().toISOString(), status: ClientStatus.ACTIVE,
-                lastContact: new Date().toISOString(), portalAccessId: crypto.randomUUID(),
-            };
-            setClients(prev => [newClient, ...prev]);
-            const newProject: Project = {
-                id: `PRJ${Date.now()}`, projectName: `Acara ${formData.clientName}`, clientName: formData.clientName, clientId: newClientId,
-                projectType: formData.projectType, packageName: selectedPackage.name, packageId: selectedPackage.id, addOns: selectedAddOns,
-                date: formData.date, location: formData.location, progress: 10, status: 'Dikonfirmasi', totalCost: totalProject,
-                amountPaid: dpAmount, paymentStatus: dpAmount >= totalProject ? PaymentStatus.LUNAS : (dpAmount > 0 ? PaymentStatus.DP_TERBAYAR : PaymentStatus.BELUM_BAYAR),
-                team: [], notes: formData.notes, promoCodeId: formData.promoCodeId || undefined, discountAmount: finalDiscountAmount > 0 ? finalDiscountAmount : undefined,
-            };
-            setProjects(prev => [newProject, ...prev]);
-            if (dpAmount > 0) {
-                 const newTransaction: Transaction = {
-                    id: `TRN-DP-${newProject.id}`, date: new Date().toISOString(), description: `DP Proyek ${newProject.projectName}`,
-                    amount: dpAmount, type: TransactionType.INCOME, projectId: newProject.id, category: 'DP Proyek',
-                    method: 'Transfer Bank', cardId: formData.dpDestinationCardId,
+            } else if (modalMode === 'convert' && selectedLead) {
+                // --- CONVERSION LOGIC ---
+                // 1. Calculate final costs
+                const selectedPackage = packages.find(p => p.id === formData.packageId);
+                if (!selectedPackage) throw new Error('Harap pilih paket.');
+                const selectedAddOns = addOns.filter(addon => formData.selectedAddOnIds.includes(addon.id));
+                const totalBeforeDiscount = selectedPackage.price + selectedAddOns.reduce((sum, addon) => sum + addon.price, 0);
+                let finalDiscountAmount = 0;
+                const promoCode = promoCodes.find(p => p.id === formData.promoCodeId);
+                if (promoCode) {
+                    finalDiscountAmount = promoCode.discountType === 'percentage' ? (totalBeforeDiscount * promoCode.discountValue) / 100 : promoCode.discountValue;
+                }
+                const totalProject = totalBeforeDiscount - finalDiscountAmount;
+                const dpAmount = Number(formData.dp) || 0;
+
+                // 2. Create Client
+                const newClientData = {
+                    name: formData.clientName, email: formData.email, phone: formData.phone, whatsapp: formData.whatsapp,
+                    instagram: formData.instagram, clientType: formData.clientType, since: new Date().toISOString(),
+                    status: ClientStatus.ACTIVE, lastContact: new Date().toISOString(), portalAccessId: crypto.randomUUID(),
                 };
-                setTransactions(prev => [...prev, newTransaction].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                setCards(prev => prev.map(c => c.id === formData.dpDestinationCardId ? {...c, balance: c.balance + dpAmount} : c));
+                const createdClient = await SupabaseService.createClient(newClientData);
+                setClients(prev => [createdClient, ...prev]);
+
+                // 3. Create Project
+                const newProjectData = {
+                    projectName: formData.projectName, clientName: createdClient.name, clientId: createdClient.id,
+                    projectType: formData.projectType, packageName: selectedPackage.name, packageId: selectedPackage.id, addOns: selectedAddOns,
+                    date: formData.date, location: formData.location, progress: 10, status: 'Dikonfirmasi', totalCost: totalProject,
+                    amountPaid: dpAmount, paymentStatus: dpAmount >= totalProject ? PaymentStatus.LUNAS : (dpAmount > 0 ? PaymentStatus.DP_TERBAYAR : PaymentStatus.BELUM_BAYAR),
+                    team: [], notes: formData.notes, promoCodeId: formData.promoCodeId || undefined, discountAmount: finalDiscountAmount > 0 ? finalDiscountAmount : undefined,
+                };
+                const createdProject = await SupabaseService.createProject(newProjectData);
+                setProjects(prev => [createdProject, ...prev]);
+
+                // 4. Handle DP Transaction if it exists
+                if (dpAmount > 0 && formData.dpDestinationCardId) {
+                    const newTransactionData = {
+                        date: new Date().toISOString(), description: `DP Proyek ${createdProject.projectName}`,
+                        amount: dpAmount, type: TransactionType.INCOME, projectId: createdProject.id, category: 'DP Proyek',
+                        method: 'Transfer Bank', cardId: formData.dpDestinationCardId,
+                    };
+                    const createdTransaction = await SupabaseService.createTransaction(newTransactionData);
+                    setTransactions(prev => [createdTransaction, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+
+                    const cardToUpdate = cards.find(c => c.id === formData.dpDestinationCardId);
+                    if(cardToUpdate) {
+                        const updatedCard = await SupabaseService.updateCard(cardToUpdate.id, { balance: cardToUpdate.balance + dpAmount });
+                        setCards(prev => prev.map(c => c.id === updatedCard.id ? updatedCard : c));
+                    }
+                }
+
+                // 5. Update Promo Code Usage
+                if (promoCode) {
+                    const updatedPromo = await SupabaseService.updatePromoCode(promoCode.id, { usageCount: promoCode.usageCount + 1 });
+                    setPromoCodes(prev => prev.map(p => p.id === updatedPromo.id ? updatedPromo : p));
+                }
+
+                // 6. Update Lead Status
+                const updatedLead = await SupabaseService.updateLead(selectedLead.id, { status: LeadStatus.CONVERTED, notes: `Dikonversi menjadi Klien ID: ${createdClient.id}` });
+                setLeads(prev => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
+
+                showNotification(`Prospek ${selectedLead.name} berhasil dikonversi menjadi klien!`);
             }
-            if (promoCode) { setPromoCodes(prev => prev.map(p => p.id === promoCode.id ? { ...p, usageCount: p.usageCount + 1 } : p)); }
-            setLeads(prev => prev.map(l => l.id === selectedLead.id ? { ...l, status: LeadStatus.CONVERTED, notes: `Dikonversi menjadi Klien ID: ${newClientId}` } : l));
-            showNotification(`Prospek ${selectedLead.name} berhasil dikonversi menjadi klien!`);
+        } catch (error: any) {
+            console.error('Error submitting form:', error);
+            alert(`Terjadi kesalahan: ${error.message}`);
+            return;
         }
         handleCloseModal();
     };

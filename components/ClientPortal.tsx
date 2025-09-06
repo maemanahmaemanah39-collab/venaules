@@ -3,6 +3,7 @@ import { Client, Project, ClientFeedback, SatisfactionLevel, Contract, Transacti
 import { FolderKanbanIcon, ClockIcon, StarIcon, FileTextIcon, HomeIcon, CreditCardIcon, CheckCircleIcon, SendIcon, DownloadIcon, GalleryHorizontalIcon, MessageSquareIcon, PrinterIcon } from '../constants';
 import Modal from './Modal';
 import SignaturePad from './SignaturePad';
+import SupabaseService from '../lib/supabaseService';
 
 const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
 const formatCurrency = (amount: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
@@ -14,20 +15,109 @@ const getSatisfactionFromRating = (rating: number): SatisfactionLevel => {
     return SatisfactionLevel.UNSATISFIED;
 };
 
+const ClientPortal: React.FC<{ accessId: string, showNotification: (message: string) => void }> = ({ accessId, showNotification }) => {
+    const [profile, setProfile] = useState<Profile | null>(null);
+    const [client, setClient] = useState<Client | null>(null);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [contracts, setContracts] = useState<Contract[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [loading, setLoading] = useState(true);
 
-const ClientPortal: React.FC<ClientPortalProps> = ({ accessId, clients, projects, contracts, transactions, setClientFeedback, showNotification, userProfile, packages, onClientConfirmation, onClientSubStatusConfirmation, onSignContract }) => {
-    const profile = userProfile;
-    const client = useMemo(() => clients.find(c => c.portalAccessId === accessId), [clients, accessId]);
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const fetchedProfile = await SupabaseService.getPrimaryProfile();
+                setProfile(fetchedProfile);
+
+                const fetchedClient = await SupabaseService.getClientByPortalId(accessId);
+                if (fetchedClient) {
+                    setClient(fetchedClient);
+
+                    const [fetchedProjects, fetchedContracts, allTransactions, fetchedPackages] = await Promise.all([
+                        SupabaseService.getProjectsByClientId(fetchedClient.id),
+                        SupabaseService.getContractsByClientId(fetchedClient.id),
+                        SupabaseService.getTransactions(),
+                        SupabaseService.getPackages()
+                    ]);
+
+                    const clientProjectIds = fetchedProjects.map(p => p.id);
+                    const clientTransactions = allTransactions.filter(t => t.projectId && clientProjectIds.includes(t.projectId));
+
+                    setProjects(fetchedProjects);
+                    setContracts(fetchedContracts);
+                    setTransactions(clientTransactions);
+                    setPackages(fetchedPackages);
+                } else {
+                    setClient(null);
+                }
+            } catch (error) {
+                console.error('Error fetching client portal data:', error);
+                showNotification('Gagal memuat data portal.');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        if (accessId) {
+            fetchData();
+        }
+    }, [accessId, showNotification]);
+
     const isVendorClient = client?.clientType === 'Vendor';
-
     const [activeTab, setActiveTab] = useState(isVendorClient ? 'proyek' : 'beranda');
-    const clientProjects = useMemo(() => projects.filter(p => p.clientId === client?.id).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [projects, client]);
-    const clientContracts = useMemo(() => contracts.filter(c => c.clientId === client?.id), [contracts, client]);
     const [viewingDocument, setViewingDocument] = useState<{ type: 'invoice' | 'receipt' | 'contract', project: Project, data: any } | null>(null);
-    const template = profile.publicPageConfig.template || 'classic';
 
+    // Event handlers that call Supabase
+    const handleSetClientFeedback = async (feedback: Omit<ClientFeedback, 'id'>) => {
+        try {
+            const newFeedback = await SupabaseService.createClientFeedback(feedback);
+            showNotification('Terima kasih! Masukan Anda telah kami terima.');
+            // Optionally, you could refetch feedback if it was displayed here.
+        } catch (error) {
+            console.error("Failed to submit feedback:", error);
+            showNotification('Gagal mengirim masukan. Silakan coba lagi.');
+        }
+    };
 
-    if (!client) {
+    const handleClientSubStatusConfirmation = async (projectId: string, subStatusName: string, note: string) => {
+        try {
+            const projectToUpdate = projects.find(p => p.id === projectId);
+            if (!projectToUpdate) return;
+
+            const updatedConfirmedSubStatuses = [...(projectToUpdate.confirmedSubStatuses || []), subStatusName];
+            const updatedNotes = { ...(projectToUpdate.clientSubStatusNotes || {}), [subStatusName]: note };
+
+            const updatedProject = await SupabaseService.updateProject(projectId, {
+                confirmedSubStatuses: updatedConfirmedSubStatuses,
+                clientSubStatusNotes: updatedNotes
+            });
+
+            setProjects(projects.map(p => p.id === projectId ? updatedProject : p));
+            showNotification(`Status "${subStatusName}" telah dikonfirmasi.`);
+        } catch (error) {
+            console.error("Failed to confirm sub-status:", error);
+            showNotification('Gagal mengkonfirmasi status. Silakan coba lagi.');
+        }
+    };
+
+    const handleSignContract = async (contractId: string, signature: string, signer: 'vendor' | 'client') => {
+        try {
+            const updatedContract = await SupabaseService.updateContract(contractId, { clientSignature: signature });
+            setContracts(contracts.map(c => c.id === contractId ? updatedContract : c));
+            showNotification('Kontrak berhasil ditandatangani.');
+        } catch (error) {
+            console.error("Failed to sign contract:", error);
+            showNotification('Gagal menandatangani kontrak. Silakan coba lagi.');
+        }
+    };
+
+    if (loading) {
+        return <div className="flex items-center justify-center min-h-screen p-4 bg-public-bg"><div className="text-xl font-semibold text-public-text-primary">Memuat Portal...</div></div>;
+    }
+
+    if (!client || !profile) {
         return (
             <div className="flex items-center justify-center min-h-screen p-4 bg-public-bg">
                 <div className="w-full max-w-lg p-8 text-center bg-public-surface rounded-2xl shadow-lg">
@@ -38,6 +128,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ accessId, clients, projects
         );
     }
     
+    const template = profile.publicPageConfig.template || 'classic';
     const allTabs = [
         { id: 'beranda', label: 'Beranda', icon: HomeIcon },
         { id: 'proyek', label: 'Proyek Saya', icon: FolderKanbanIcon },
@@ -57,17 +148,17 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ accessId, clients, projects
     const renderContent = () => {
         switch(activeTab) {
             case 'beranda':
-                return <DashboardTab client={client} projects={clientProjects} profile={profile} />;
+                return <DashboardTab client={client} projects={projects} profile={profile} />;
             case 'proyek':
-                return <ProjectsTab projects={clientProjects} profile={profile} onConfirm={onClientSubStatusConfirmation} />;
+                return <ProjectsTab projects={projects} profile={profile} onConfirm={handleClientSubStatusConfirmation} />;
             case 'galeri':
-                return <GalleryTab projects={clientProjects} packages={packages} />;
+                return <GalleryTab projects={projects} packages={packages} />;
             case 'keuangan':
-                 return <FinanceTab projects={clientProjects} contracts={contracts} transactions={transactions} onSignContract={onSignContract} profile={profile} packages={packages} client={client} onViewDocument={setViewingDocument} />;
+                 return <FinanceTab projects={projects} contracts={contracts} transactions={transactions} onSignContract={handleSignContract} profile={profile} packages={packages} client={client} onViewDocument={setViewingDocument} />;
             case 'kontrak':
-                 return <ContractsTab contracts={clientContracts} projects={clientProjects} onViewContract={(contract) => setViewingDocument({type: 'contract', project: clientProjects.find(p => p.id === contract.projectId)!, data: contract})} />;
+                 return <ContractsTab contracts={contracts} projects={projects} onViewContract={(contract) => setViewingDocument({type: 'contract', project: projects.find(p => p.id === contract.projectId)!, data: contract})} />;
             case 'umpan-balik':
-                return <FeedbackTab client={client} setClientFeedback={setClientFeedback} showNotification={showNotification} />;
+                return <FeedbackTab client={client} setClientFeedback={handleSetClientFeedback} showNotification={showNotification} />;
             default:
                 return null;
         }
@@ -146,7 +237,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ accessId, clients, projects
                 profile={profile} 
                 packages={packages} 
                 client={client} 
-                onSignContract={onSignContract}
+                onSignContract={handleSignContract}
             />
         </div>
     );
@@ -442,24 +533,26 @@ const ContractsTab: React.FC<{ contracts: Contract[], projects: Project[], onVie
 );
 
 
-const FeedbackTab: React.FC<{client: Client, setClientFeedback: any, showNotification: any}> = ({ client, setClientFeedback, showNotification }) => {
+const FeedbackTab: React.FC<{client: Client, setClientFeedback: (feedback: Omit<ClientFeedback, 'id'>) => Promise<void>, showNotification: any}> = ({ client, setClientFeedback, showNotification }) => {
     const [rating, setRating] = useState(0);
     const [feedbackText, setFeedbackText] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (rating === 0) { alert('Mohon berikan peringkat.'); return; }
         setIsSubmitting(true);
-        const newFeedback: ClientFeedback = {
-            id: `FB-PORTAL-${Date.now()}`, clientName: client!.name, rating,
-            satisfaction: getSatisfactionFromRating(rating), feedback: feedbackText, date: new Date().toISOString(),
+        const newFeedback: Omit<ClientFeedback, 'id'> = {
+            clientName: client.name,
+            rating,
+            satisfaction: getSatisfactionFromRating(rating),
+            feedback: feedbackText,
+            date: new Date().toISOString(),
         };
-        setTimeout(() => {
-            setClientFeedback((prev: ClientFeedback[]) => [newFeedback, ...prev]);
-            showNotification('Terima kasih! Masukan Anda telah kami terima.');
-            setRating(0); setFeedbackText(''); setIsSubmitting(false);
-        }, 1000);
+        await setClientFeedback(newFeedback);
+        setRating(0);
+        setFeedbackText('');
+        setIsSubmitting(false);
     };
 
     return (

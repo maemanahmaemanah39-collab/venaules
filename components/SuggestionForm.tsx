@@ -1,23 +1,23 @@
 import React, { useState } from 'react';
 import { Lead, LeadStatus, ContactChannel } from '../types';
+import SupabaseService from '../lib/supabaseService';
 
 interface SuggestionFormProps {
-    setLeads: React.Dispatch<React.SetStateAction<Lead[]>>;
+    showNotification: (message: string) => void;
 }
 
-const SuggestionForm: React.FC<SuggestionFormProps> = ({ setLeads }) => {
+const SuggestionForm: React.FC<SuggestionFormProps> = ({ showNotification }) => {
     const [name, setName] = useState('');
     const [contact, setContact] = useState('');
     const [message, setMessage] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSubmitted, setIsSubmitted] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
 
-        const newLead: Lead = {
-            id: crypto.randomUUID(),
+        const newLead: Omit<Lead, 'id'> = {
             name: name,
             contactChannel: ContactChannel.SUGGESTION_FORM,
             location: 'Form Online',
@@ -26,12 +26,16 @@ const SuggestionForm: React.FC<SuggestionFormProps> = ({ setLeads }) => {
             notes: `Kontak: ${contact}\n\nPesan:\n${message}`
         };
 
-        // Simulate API call to save the lead
-        setTimeout(() => {
-            setLeads(prev => [newLead, ...prev]);
-            setIsSubmitting(false);
+        try {
+            await SupabaseService.createLead(newLead);
             setIsSubmitted(true);
-        }, 1000);
+            showNotification('Saran Anda telah berhasil dikirim. Terima kasih!');
+        } catch (error) {
+            console.error("Error submitting suggestion:", error);
+            showNotification('Gagal mengirim saran. Silakan coba lagi.');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
     
     const Logo = () => (

@@ -92,10 +92,10 @@ interface WhatsappTemplateModalProps {
     onClose: () => void;
     showNotification: (message: string) => void;
     userProfile: Profile;
-    setProfile: React.Dispatch<React.SetStateAction<Profile>>;
+    onSaveTemplates: (updatedTemplates: any[]) => Promise<void>;
 }
 
-const WhatsappTemplateModal: React.FC<WhatsappTemplateModalProps> = ({ project, client, onClose, showNotification, userProfile, setProfile }) => {
+const WhatsappTemplateModal: React.FC<WhatsappTemplateModalProps> = ({ project, client, onClose, showNotification, userProfile, onSaveTemplates }) => {
     const templates = userProfile.chatTemplates || CHAT_TEMPLATES;
     const [selectedTemplate, setSelectedTemplate] = useState(templates[0]?.id || '');
     const [customMessage, setCustomMessage] = useState('');
@@ -124,18 +124,16 @@ const WhatsappTemplateModal: React.FC<WhatsappTemplateModalProps> = ({ project, 
         onClose();
     };
 
-    const handleSaveTemplate = () => {
+    const handleSaveTemplate = async () => {
         const rawTemplate = customMessage
             .replace(new RegExp(client.name, 'g'), '{clientName}')
             .replace(new RegExp(project.projectName, 'g'), '{projectName}');
 
-        setProfile(prevProfile => {
-            const newTemplates = (prevProfile.chatTemplates || CHAT_TEMPLATES).map(t =>
-                t.id === selectedTemplate ? { ...t, template: rawTemplate } : t
-            );
-            return { ...prevProfile, chatTemplates: newTemplates };
-        });
-        showNotification('Template berhasil disimpan!');
+        const newTemplates = (userProfile.chatTemplates || CHAT_TEMPLATES).map(t =>
+            t.id === selectedTemplate ? { ...t, template: rawTemplate } : t
+        );
+
+        await onSaveTemplates(newTemplates);
     };
 
     return (
@@ -173,18 +171,51 @@ const WhatsappTemplateModal: React.FC<WhatsappTemplateModalProps> = ({ project, 
 
 
 interface BookingProps {
-    leads: Lead[];
-    clients: Client[];
-    projects: Project[];
-    setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
-    packages: Package[];
-    userProfile: Profile;
-    setProfile: React.Dispatch<React.SetStateAction<Profile>>;
     handleNavigation: (view: ViewType, action?: NavigationAction) => void;
     showNotification: (message: string) => void;
 }
 
-const Booking: React.FC<BookingProps> = ({ leads, clients, projects, setProjects, packages, userProfile, setProfile, handleNavigation, showNotification }) => {
+const Booking: React.FC<BookingProps> = ({ handleNavigation, showNotification }) => {
+    const [leads, setLeads] = useState<Lead[]>([]);
+    const [clients, setClients] = useState<Client[]>([]);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [userProfile, setProfile] = useState<Profile | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const [
+                    leadsData,
+                    clientsData,
+                    projectsData,
+                    packagesData,
+                    profileData,
+                ] = await Promise.all([
+                    SupabaseService.getLeads(),
+                    SupabaseService.getClients(),
+                    SupabaseService.getProjects(),
+                    SupabaseService.getPackages(),
+                    SupabaseService.getProfile(),
+                ]);
+
+                setLeads(leadsData);
+                setClients(clientsData);
+                setProjects(projectsData);
+                setPackages(packagesData);
+                setProfile(profileData[0] || null);
+            } catch (error) {
+                console.error("Error fetching booking data:", error);
+                showNotification("Gagal memuat data booking.");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, []);
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
     const [viewingProofUrl, setViewingProofUrl] = useState<string | null>(null);
@@ -192,6 +223,20 @@ const Booking: React.FC<BookingProps> = ({ leads, clients, projects, setProjects
     const [activeStatModal, setActiveStatModal] = useState<string | null>(null);
     const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+
+    if (loading || !userProfile) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="text-center">
+                    <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="mt-4 text-brand-text-secondary">Memuat data booking...</p>
+                </div>
+            </div>
+        );
+    }
 
     const allBookings = useMemo(() => {
         return projects
@@ -298,14 +343,27 @@ const Booking: React.FC<BookingProps> = ({ leads, clients, projects, setProjects
         }
     }, [activeStatModal, allBookings, newBookings, mostPopularPackage]);
 
-    const handleStatusChange = (projectId: string, newStatus: BookingStatus) => {
-        setProjects(prev => prev.map(p => {
-            if (p.id === projectId) {
-                return { ...p, bookingStatus: newStatus };
-            }
-            return p;
-        }));
-        showNotification(`Booking berhasil ${newStatus === BookingStatus.TERKONFIRMASI ? 'dikonfirmasi' : 'ditolak'}.`);
+    const handleStatusChange = async (projectId: string, newStatus: BookingStatus) => {
+        try {
+            const updatedProject = await SupabaseService.updateProject(projectId, { bookingStatus: newStatus });
+            setProjects(prev => prev.map(p => p.id === projectId ? updatedProject : p));
+            showNotification(`Booking berhasil ${newStatus === BookingStatus.TERKONFIRMASI ? 'dikonfirmasi' : 'ditolak'}.`);
+        } catch (error: any) {
+            console.error('Error updating booking status:', error);
+            alert(`Gagal memperbarui status booking: ${error.message}`);
+        }
+    };
+
+    const handleSaveTemplates = async (updatedTemplates: any[]) => {
+        if (!userProfile) return;
+        try {
+            const updatedProfile = await SupabaseService.updateProfile(userProfile.id, { chatTemplates: updatedTemplates });
+            setProfile(updatedProfile);
+            showNotification('Template berhasil disimpan!');
+        } catch (error) {
+            showNotification('Gagal menyimpan template.');
+            console.error("Error saving template:", error);
+        }
     };
 
     return (
@@ -538,7 +596,7 @@ const Booking: React.FC<BookingProps> = ({ leads, clients, projects, setProjects
                     onClose={() => setWhatsappTemplateModal(null)}
                     showNotification={showNotification}
                     userProfile={userProfile}
-                    setProfile={setProfile}
+                    onSaveTemplates={handleSaveTemplates}
                 />
             )}
             <Modal isOpen={!!viewingProofUrl} onClose={() => setViewingProofUrl(null)} title="Bukti Pembayaran">

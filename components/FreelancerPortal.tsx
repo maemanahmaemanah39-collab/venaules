@@ -1,27 +1,95 @@
-
-
 import React, { useState, useMemo, useEffect } from 'react';
-import { TeamMember, Project, TeamProjectPayment, FreelancerFeedback, Revision, RevisionStatus, PerformanceNoteType, TeamPaymentRecord, RewardLedgerEntry, PerformanceNote, SOP, Profile, FreelancerPortalProps } from '../types';
+import { TeamMember, Project, TeamProjectPayment, Revision, RevisionStatus, TeamPaymentRecord, RewardLedgerEntry, SOP, Profile } from '../types';
 import Modal from './Modal';
 import { CalendarIcon, CreditCardIcon, MessageSquareIcon, ClockIcon, UsersIcon, FileTextIcon, MapPinIcon, HomeIcon, FolderKanbanIcon, StarIcon, DollarSignIcon, AlertCircleIcon, BookOpenIcon, PrinterIcon, CheckSquareIcon, Share2Icon } from '../constants';
 import StatCard from './StatCard';
-import SignaturePad from './SignaturePad';
+import SupabaseService from '../lib/supabaseService';
 
 const formatCurrency = (amount: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
 const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
-const getInitials = (name: string) => name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
+const FreelancerPortal: React.FC<{ accessId: string; showNotification: (message: string) => void; }> = ({ accessId, showNotification }) => {
+    const [loading, setLoading] = useState(true);
+    const [freelancer, setFreelancer] = useState<TeamMember | null>(null);
+    const [assignedProjects, setAssignedProjects] = useState<Project[]>([]);
+    const [teamProjectPayments, setTeamProjectPayments] = useState<TeamProjectPayment[]>([]);
+    const [teamPaymentRecords, setTeamPaymentRecords] = useState<TeamPaymentRecord[]>([]);
+    const [sops, setSops] = useState<SOP[]>([]);
+    const [profile, setProfile] = useState<Profile | null>(null);
 
-const FreelancerPortal: React.FC<FreelancerPortalProps> = ({ accessId, teamMembers, projects, teamProjectPayments, teamPaymentRecords, rewardLedgerEntries, showNotification, onUpdateRevision, sops, userProfile }) => {
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const fetchedFreelancer = await SupabaseService.getFreelancerByPortalId(accessId);
+                setFreelancer(fetchedFreelancer);
+
+                if (fetchedFreelancer) {
+                    const [
+                        projectsData,
+                        paymentsData,
+                        allPaymentRecords,
+                        sopsData,
+                        profileData,
+                    ] = await Promise.all([
+                        SupabaseService.getProjectsByFreelancerId(fetchedFreelancer.id),
+                        SupabaseService.getTeamProjectPaymentsByFreelancerId(fetchedFreelancer.id),
+                        SupabaseService.getTeamPaymentRecords(),
+                        SupabaseService.getSOPs(),
+                        SupabaseService.getPrimaryProfile(),
+                    ]);
+
+                    setAssignedProjects(projectsData);
+                    setTeamProjectPayments(paymentsData);
+
+                    // Filter payment records that are relevant to this freelancer's payments
+                    const paidPaymentIds = new Set(paymentsData.filter(p => p.status === 'Paid').map(p => p.id));
+                    const relevantPaymentRecords = allPaymentRecords.filter(rec =>
+                        rec.projectPaymentIds.some(id => paidPaymentIds.has(id))
+                    );
+                    setTeamPaymentRecords(relevantPaymentRecords);
+
+                    setSops(sopsData);
+                    setProfile(profileData);
+                }
+            } catch (error) {
+                console.error("Error fetching freelancer portal data:", error);
+                showNotification("Gagal memuat data portal.");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, [accessId, showNotification]);
+
+    const handleUpdateRevision = async (projectId: string, revisionId: string, updates: Partial<Revision>) => {
+        const projectToUpdate = assignedProjects.find(p => p.id === projectId);
+        if (!projectToUpdate) return;
+
+        const newRevisions = (projectToUpdate.revisions || []).map(rev =>
+            rev.id === revisionId ? { ...rev, ...updates } : rev
+        );
+
+        try {
+            const updatedProject = await SupabaseService.updateProject(projectId, { revisions: newRevisions });
+            setAssignedProjects(prev => prev.map(p => p.id === projectId ? updatedProject : p));
+            showNotification("Status revisi berhasil diperbarui.");
+        } catch (error) {
+            console.error("Failed to update revision:", error);
+            showNotification("Gagal memperbarui revisi.");
+        }
+    };
+
     const [activeTab, setActiveTab] = useState('dashboard');
     const [selectedProject, setSelectedProject] = useState<Project | null>(null);
     const [slipToView, setSlipToView] = useState<TeamPaymentRecord | null>(null);
-    const profile = userProfile;
 
-    const freelancer = useMemo(() => teamMembers.find(m => m.portalAccessId === accessId), [teamMembers, accessId]);
-    const assignedProjects = useMemo(() => projects.filter(p => p.team.some(t => t.memberId === freelancer?.id)).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [projects, freelancer]);
-    
-    if (!freelancer) {
+    if (loading) {
+        return <div className="flex items-center justify-center min-h-screen bg-public-bg"><p>Loading...</p></div>;
+    }
+
+    if (!freelancer || !profile) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-public-bg p-4">
                 <div className="w-full max-w-lg p-8 text-center bg-public-surface rounded-2xl shadow-lg">
@@ -62,7 +130,7 @@ const FreelancerPortal: React.FC<FreelancerPortalProps> = ({ accessId, teamMembe
                         <tbody className="divide-y divide-slate-200">
                             {projectsBeingPaid.map(p => (
                                 <tr key={p.id}>
-                                    <td className="p-2">{projects.find(proj => proj.id === p.projectId)?.projectName || 'N/A'}</td>
+                                    <td className="p-2">{assignedProjects.find(proj => proj.id === p.projectId)?.projectName || 'N/A'}</td>
                                     <td className="p-2 text-right">{formatCurrency(p.fee)}</td>
                                 </tr>
                             ))}
@@ -99,7 +167,7 @@ const FreelancerPortal: React.FC<FreelancerPortalProps> = ({ accessId, teamMembe
         switch (activeTab) {
             case 'dashboard': return <DashboardTab freelancer={freelancer} projects={assignedProjects} teamProjectPayments={teamProjectPayments} />;
             case 'projects': return <ProjectsTab projects={assignedProjects} onProjectClick={setSelectedProject} freelancerId={freelancer.id} />;
-            case 'payments': return <PaymentsTab freelancer={freelancer} projects={projects} teamProjectPayments={teamProjectPayments} teamPaymentRecords={teamPaymentRecords} onSlipView={setSlipToView} />;
+            case 'payments': return <PaymentsTab freelancer={freelancer} projects={assignedProjects} teamProjectPayments={teamProjectPayments} teamPaymentRecords={teamPaymentRecords} onSlipView={setSlipToView} />;
             case 'performance': return <PerformanceTab freelancer={freelancer} />;
             case 'sop': return <SOPsTab sops={sops} assignedProjects={assignedProjects} />;
             default: return null;
@@ -116,7 +184,7 @@ const FreelancerPortal: React.FC<FreelancerPortalProps> = ({ accessId, teamMembe
                 <div className="border-b border-public-border mb-6 widget-animate" style={{ animationDelay: '100ms' }}><nav className="-mb-px flex space-x-6 overflow-x-auto">{tabs.map(tab => (<button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`shrink-0 inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm ${activeTab === tab.id ? 'border-public-accent text-public-accent' : 'border-transparent text-public-text-secondary hover:text-public-text-primary'}`}><tab.icon className="w-5 h-5"/> {tab.label}</button>))}</nav></div>
                 <main>{renderTabContent()}</main>
                 <Modal isOpen={!!selectedProject} onClose={() => setSelectedProject(null)} title={`Detail Proyek: ${selectedProject?.projectName}`} size="3xl">
-                    {selectedProject && <ProjectDetailModal project={selectedProject} freelancer={freelancer} onUpdateRevision={onUpdateRevision} showNotification={showNotification} onClose={() => setSelectedProject(null)} />}
+                    {selectedProject && <ProjectDetailModal project={selectedProject} freelancer={freelancer} onUpdateRevision={handleUpdateRevision} showNotification={showNotification} onClose={() => setSelectedProject(null)} />}
                 </Modal>
                 <Modal isOpen={!!slipToView} onClose={() => setSlipToView(null)} title={`Slip Pembayaran: ${slipToView?.recordNumber}`} size="3xl">
                     {slipToView && <div className="printable-area">{renderPaymentSlipBody(slipToView)}</div>}
@@ -131,8 +199,7 @@ const FreelancerPortal: React.FC<FreelancerPortalProps> = ({ accessId, teamMembe
     );
 };
 
-
-// --- SUB-COMPONENTS ---
+// --- SUB-COMPONENTS (These are kept as they are, but will now receive data from the parent's state) ---
 
 const DashboardTab: React.FC<{freelancer: TeamMember, projects: Project[], teamProjectPayments: TeamProjectPayment[]}> = ({ freelancer, projects, teamProjectPayments }) => {
     const stats = useMemo(() => {
@@ -251,7 +318,7 @@ const PerformanceTab: React.FC<{freelancer: TeamMember}> = ({ freelancer }) => (
         <div className="bg-public-surface p-6 rounded-2xl shadow-lg border border-public-border widget-animate" style={{ animationDelay: '200ms' }}>
             <h3 className="text-xl font-bold text-public-text-primary mb-4">Catatan Kinerja dari Admin</h3>
             <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
-                {freelancer.performanceNotes.map((note, index) => (<div key={note.id} className={`p-4 rounded-lg border-l-4 widget-animate ${note.type === PerformanceNoteType.PRAISE ? 'border-green-400 bg-green-500/5' : 'border-yellow-400 bg-yellow-500/5'}`} style={{ animationDelay: `${300 + index * 100}ms`}}>
+                {freelancer.performanceNotes.map((note, index) => (<div key={note.id} className={`p-4 rounded-lg border-l-4 widget-animate ${note.type === 'Praise' ? 'border-green-400 bg-green-500/5' : 'border-yellow-400 bg-yellow-500/5'}`} style={{ animationDelay: `${300 + index * 100}ms`}}>
                     <p className="text-sm text-public-text-primary italic">"{note.note}"</p>
                     <p className="text-right text-xs text-public-text-secondary mt-2">- {formatDate(note.date)}</p>
                 </div>))}
@@ -311,7 +378,7 @@ const SOPsTab: React.FC<{sops: SOP[], assignedProjects: Project[]}> = ({ sops, a
     );
 };
 
-const ProjectDetailModal: React.FC<{project: Project, freelancer: TeamMember, onUpdateRevision: any, showNotification: any, onClose: any}> = ({ project, freelancer, onUpdateRevision, showNotification, onClose }) => {
+const ProjectDetailModal: React.FC<{project: Project, freelancer: TeamMember, onUpdateRevision: (projectId: string, revisionId: string, updates: Partial<Revision>) => void, showNotification: any, onClose: any}> = ({ project, freelancer, onUpdateRevision, showNotification, onClose }) => {
      const [revisionUpdateForm, setRevisionUpdateForm] = useState<{ [revisionId: string]: { freelancerNotes: string; driveLink: string } }>({});
 
      useEffect(() => {
@@ -345,7 +412,6 @@ const ProjectDetailModal: React.FC<{project: Project, freelancer: TeamMember, on
         const formData = revisionUpdateForm[revision.id];
         if (!formData || !formData.driveLink) { alert('Harap isi tautan Google Drive hasil revisi.'); return; }
         onUpdateRevision(project.id, revision.id, { freelancerNotes: formData.freelancerNotes || '', driveLink: formData.driveLink || '', status: RevisionStatus.COMPLETED });
-        showNotification('Update revisi telah berhasil dikirim!');
         onClose();
     };
 

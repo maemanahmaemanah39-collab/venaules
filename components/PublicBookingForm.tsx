@@ -40,10 +40,71 @@ const toBase64 = (file: File): Promise<string> => new Promise((resolve, reject) 
 });
 
 
-const PublicBookingForm: React.FC<PublicBookingFormProps> = ({ 
-    setClients, setProjects, packages, addOns, setTransactions, userProfile, cards, setCards, pockets, setPockets, promoCodes, setPromoCodes, showNotification, leads, setLeads, addNotification
+const PublicBookingForm: React.FC<Omit<PublicBookingFormProps, 'setClients' | 'setProjects' | 'packages' | 'addOns' | 'setTransactions' | 'userProfile' | 'cards' | 'setCards' | 'pockets' | 'setPockets' | 'promoCodes' | 'setPromoCodes' | 'leads' | 'setLeads'>> = ({
+    showNotification, addNotification
 }) => {
-    const [formData, setFormData] = useState({...initialFormState, projectType: userProfile.projectTypes[0] || ''});
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [addOns, setAddOns] = useState<AddOn[]>([]);
+    const [userProfile, setUserProfile] = useState<Profile | null>(null);
+    const [cards, setCards] = useState<Card[]>([]);
+    const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
+    const [leads, setLeads] = useState<Lead[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const [
+                    packagesData,
+                    addOnsData,
+                    profileData,
+                    cardsData,
+                    promoCodesData,
+                    leadsData,
+                ] = await Promise.all([
+                    SupabaseService.getPackages(),
+                    SupabaseService.getAddOns(),
+                    SupabaseService.getProfile(),
+                    SupabaseService.getCards(),
+                    SupabaseService.getPromoCodes(),
+                    SupabaseService.getLeads(),
+                ]);
+                setPackages(packagesData);
+                setAddOns(addOnsData);
+                setUserProfile(profileData[0] || null);
+                setCards(cardsData);
+                setPromoCodes(promoCodesData);
+                setLeads(leadsData);
+            } catch (error) {
+                console.error("Error fetching public booking form data:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
+    const [formData, setFormData] = useState(initialFormState);
+
+    useEffect(() => {
+        if (userProfile) {
+            setFormData(prev => ({...prev, projectType: userProfile.projectTypes[0] || ''}));
+        }
+    }, [userProfile]);
+
+    if (loading || !userProfile) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="text-center">
+                    <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="mt-4 text-brand-text-secondary">Memuat formulir...</p>
+                </div>
+            </div>
+        );
+    }
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [promoFeedback, setPromoFeedback] = useState({ type: '', message: '' });
@@ -239,26 +300,20 @@ const PublicBookingForm: React.FC<PublicBookingFormProps> = ({
 
             // 3. Update Lead if exists
             if (leadId) {
-                const leadToUpdate = { 
+                await SupabaseService.updateLead(leadId, {
                     status: LeadStatus.CONVERTED, 
                     notes: `Dikonversi dari formulir booking. Klien ID: ${createdClient.id}` 
-                };
-                await SupabaseService.updateLead(leadId, leadToUpdate);
-                setLeads(prev => prev.map(l => 
-                    l.id === leadId ? { ...l, ...leadToUpdate } : l
-                ));
+                });
             } else {
                 // Create new lead
-                const newLeadData: Omit<Lead, 'id'> = {
+                await SupabaseService.createLead({
                     name: createdClient.name,
                     contactChannel: ContactChannel.WEBSITE,
                     location: createdProject.location,
                     status: LeadStatus.CONVERTED,
                     date: new Date().toISOString(),
                     notes: `Dikonversi secara otomatis dari formulir pemesanan publik. Proyek: ${createdProject.projectName}. Klien ID: ${createdClient.id}`
-                };
-                const createdLead = await SupabaseService.createLead(newLeadData);
-                setLeads(prev => [createdLead, ...prev]);
+                });
             }
 
             // 4. Update promo code usage
@@ -266,13 +321,12 @@ const PublicBookingForm: React.FC<PublicBookingFormProps> = ({
                 const promoCode = promoCodes.find(p => p.id === promoCodeAppliedId);
                 if (promoCode) {
                     await SupabaseService.updatePromoCode(promoCodeAppliedId, { usageCount: promoCode.usageCount + 1 });
-                    setPromoCodes(prev => prev.map(p => p.id === promoCodeAppliedId ? { ...p, usageCount: p.usageCount + 1 } : p));
                 }
             }
 
             // 5. Create Transaction if DP > 0
-            if (dpAmount > 0) {
-                const newTransactionData: Omit<Transaction, 'id'> = {
+            if (dpAmount > 0 && destinationCard) {
+                await SupabaseService.createTransaction({
                     date: new Date().toISOString().split('T')[0], 
                     description: `DP Proyek ${createdProject.projectName}`,
                     amount: dpAmount, 
@@ -281,20 +335,10 @@ const PublicBookingForm: React.FC<PublicBookingFormProps> = ({
                     category: 'DP Proyek',
                     method: 'Transfer Bank', 
                     cardId: destinationCard.id,
-                };
-                const createdTransaction = await SupabaseService.createTransaction(newTransactionData);
+                });
                 
-                // Update card balance
                 await SupabaseService.updateCard(destinationCard.id, { balance: destinationCard.balance + dpAmount });
-                
-                // Update local state
-                setTransactions(prev => [createdTransaction, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                setCards(prev => prev.map(c => c.id === destinationCard.id ? { ...c, balance: c.balance + dpAmount } : c));
             }
-
-            // Update local state
-            setClients(prev => [createdClient, ...prev]);
-            setProjects(prev => [createdProject, ...prev]);
             
             setIsSubmitted(true);
             
