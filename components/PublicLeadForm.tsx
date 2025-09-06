@@ -1,18 +1,62 @@
-import React, { useState, useMemo } from 'react';
-import { Lead, LeadStatus, ContactChannel, Profile, PublicLeadFormProps, ViewType } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Lead, LeadStatus, ContactChannel, Profile, ViewType, Notification } from '../types';
 import { cleanPhoneNumber } from '../constants';
 import SupabaseService from '../lib/supabaseService';
 
-const PublicLeadForm: React.FC<PublicLeadFormProps> = ({ setLeads, userProfile, showNotification, addNotification }) => {
-    const [formState, setFormState] = useState({
-        name: '',
-        whatsapp: '',
-        eventType: userProfile.projectTypes[0] || '',
-        eventDate: '',
-        eventLocation: '',
-    });
+interface PublicLeadFormProps {
+    showNotification: (message: string) => void;
+    addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'isRead'>) => void;
+}
+
+const initialFormState = {
+    name: '',
+    whatsapp: '',
+    eventType: '',
+    eventDate: '',
+    eventLocation: '',
+};
+
+const PublicLeadForm: React.FC<PublicLeadFormProps> = ({ showNotification, addNotification }) => {
+    const [userProfile, setUserProfile] = useState<Profile | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [formState, setFormState] = useState(initialFormState);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSubmitted, setIsSubmitted] = useState(false);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const profileData = await SupabaseService.getProfile();
+                setUserProfile(profileData[0] || null);
+            } catch (error) {
+                console.error("Error fetching public lead form data:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
+
+    useEffect(() => {
+        if (userProfile) {
+            setFormState(prev => ({ ...prev, eventType: userProfile.projectTypes[0] || '' }));
+        }
+    }, [userProfile]);
+
+    if (loading || !userProfile) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </div>
+            </div>
+        );
+    }
+
     const template = userProfile.publicPageConfig.template || 'classic';
 
     const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -37,13 +81,8 @@ const PublicLeadForm: React.FC<PublicLeadFormProps> = ({ setLeads, userProfile, 
                 notes: notes
             };
 
-            // Save to Supabase
             const createdLead = await SupabaseService.createLead(newLeadData);
             
-            // Update local state
-            setLeads(prev => [createdLead, ...prev]);
-            
-            // Add notification
             addNotification({
                 title: 'Prospek Baru Diterima!',
                 message: `Prospek baru dari ${createdLead.name} telah masuk melalui formulir web.`,
@@ -54,15 +93,13 @@ const PublicLeadForm: React.FC<PublicLeadFormProps> = ({ setLeads, userProfile, 
             setIsSubmitted(true);
         } catch (error: any) {
             console.error('Error saving lead:', error);
-            const errorMessage = error.message?.includes('Timeout') 
-                ? error.message 
-                : 'Terjadi kesalahan saat menyimpan data. Silakan coba lagi.';
-            showNotification?.(errorMessage);
+            showNotification?.('Terjadi kesalahan saat menyimpan data. Silakan coba lagi.');
         } finally {
             setIsSubmitting(false);
         }
     };
 
+    // ... (rest of the component's render logic can be copied from the original file)
     if (isSubmitted) {
         return (
             <div className={`template-wrapper template-${template} flex items-center justify-center min-h-screen p-4`}>

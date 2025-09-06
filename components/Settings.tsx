@@ -237,13 +237,6 @@ const ProjectStatusManager: React.FC<{
 };
 
 interface SettingsProps {
-    profile: Profile;
-    setProfile: React.Dispatch<React.SetStateAction<Profile>>;
-    transactions: Transaction[];
-    projects: Project[];
-    packages: Package[];
-    users: User[]; // This will now be pre-filtered by App.tsx
-    setUsers: React.Dispatch<React.SetStateAction<User[]>>; // This updates the global user list
     currentUser: User | null;
     showNotification: (message: string) => void;
 }
@@ -264,7 +257,45 @@ const toBase64 = (file: File): Promise<string> => new Promise((resolve, reject) 
     reader.onerror = error => reject(error);
 });
 
-const Settings: React.FC<SettingsProps> = ({ profile, setProfile, transactions, projects, packages, users, setUsers, currentUser, showNotification }) => {
+const Settings: React.FC<SettingsProps> = ({ currentUser, showNotification }) => {
+    const [profile, setProfile] = useState<Profile | null>(null);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const [
+                    profileData,
+                    transactionsData,
+                    projectsData,
+                    packagesData,
+                    usersData,
+                ] = await Promise.all([
+                    SupabaseService.getProfile(),
+                    SupabaseService.getTransactions(),
+                    SupabaseService.getProjects(),
+                    SupabaseService.getPackages(),
+                    SupabaseService.getUsers(),
+                ]);
+                setProfile(profileData[0] || null);
+                setTransactions(transactionsData);
+                setProjects(projectsData);
+                setPackages(packagesData);
+                setUsers(usersData);
+            } catch (error) {
+                console.error("Error fetching settings data:", error);
+                showNotification("Gagal memuat data pengaturan.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
     const [activeTab, setActiveTab] = useState('profile');
     const [showSuccess, setShowSuccess] = useState(false);
 
@@ -288,6 +319,20 @@ const Settings: React.FC<SettingsProps> = ({ profile, setProfile, transactions, 
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const [userForm, setUserForm] = useState(emptyUserForm);
     const [userFormError, setUserFormError] = useState('');
+
+    if (loading || !profile) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="text-center">
+                    <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="mt-4 text-brand-text-secondary">Memuat pengaturan...</p>
+                </div>
+            </div>
+        );
+    }
 
     const permissionGroups = {
         'Manajemen Inti': [ViewType.PROSPEK, ViewType.BOOKING, ViewType.CLIENTS, ViewType.PROJECTS],
@@ -365,10 +410,19 @@ const Settings: React.FC<SettingsProps> = ({ profile, setProfile, transactions, 
         }));
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 2000);
+        if (!profile) return;
+        try {
+            const updatedProfile = await SupabaseService.updateProfile(profile.id, profile);
+            setProfile(updatedProfile);
+            showNotification('Pengaturan berhasil disimpan.');
+            setShowSuccess(true);
+            setTimeout(() => setShowSuccess(false), 2000);
+        } catch (error: any) {
+            console.error("Error saving settings:", error);
+            showNotification('Gagal menyimpan pengaturan.');
+        }
     }
     
     // --- User Management Handlers ---

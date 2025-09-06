@@ -522,29 +522,11 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({ client, projects,
 
 
 interface ClientsProps {
-    clients: Client[];
-    setClients: React.Dispatch<React.SetStateAction<Client[]>>;
-    projects: Project[];
-    setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
-    packages: Package[];
-    addOns: AddOn[];
-    transactions: Transaction[];
-    setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
     userProfile: Profile;
     showNotification: (message: string) => void;
     initialAction: NavigationAction | null;
     setInitialAction: (action: NavigationAction | null) => void;
-    cards: Card[];
-    setCards: React.Dispatch<React.SetStateAction<Card[]>>;
-    pockets: FinancialPocket[];
-    setPockets: React.Dispatch<React.SetStateAction<FinancialPocket[]>>;
-    contracts: Contract[];
     handleNavigation: (view: ViewType, action: NavigationAction) => void;
-    clientFeedback: ClientFeedback[];
-    promoCodes: PromoCode[];
-    setPromoCodes: React.Dispatch<React.SetStateAction<PromoCode[]>>;
-    onSignInvoice: (projectId: string, signatureDataUrl: string) => void;
-    onSignTransaction: (transactionId: string, signatureDataUrl: string) => void;
     addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'isRead'>) => void;
 }
 
@@ -573,7 +555,20 @@ const NewClientsChart: React.FC<{ data: { name: string; count: number }[] }> = (
     );
 };
 
-const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setProjects, packages, addOns, transactions, setTransactions, userProfile, showNotification, initialAction, setInitialAction, cards, setCards, pockets, setPockets, contracts, handleNavigation, clientFeedback, promoCodes, setPromoCodes, onSignInvoice, onSignTransaction, addNotification }) => {
+const Clients: React.FC<ClientsProps> = ({ userProfile, showNotification, initialAction, setInitialAction, handleNavigation, addNotification }) => {
+    // --- Local State ---
+    const [clients, setClients] = useState<Client[]>([]);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [addOns, setAddOns] = useState<AddOn[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [cards, setCards] = useState<Card[]>([]);
+    const [pockets, setPockets] = useState<FinancialPocket[]>([]);
+    const [contracts, setContracts] = useState<Contract[]>([]);
+    const [clientFeedback, setClientFeedback] = useState<ClientFeedback[]>([]);
+    const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
+    const [loading, setLoading] = useState(true);
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -588,7 +583,6 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
     const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
     const [qrModalContent, setQrModalContent] = useState<{ title: string; url: string } | null>(null);
     
-    // New state for filters and UI
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('Semua Status');
     const [dateFrom, setDateFrom] = useState('');
@@ -598,6 +592,55 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
     const [isBookingFormShareModalOpen, setIsBookingFormShareModalOpen] = useState(false);
     const [activeStatModal, setActiveStatModal] = useState<'active' | 'location' | 'receivables' | 'total' | null>(null);
     const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+
+    // --- Data Fetching ---
+    const fetchData = async () => {
+        setLoading(true);
+        try {
+            const [
+                clientsData,
+                projectsData,
+                packagesData,
+                addOnsData,
+                transactionsData,
+                cardsData,
+                pocketsData,
+                contractsData,
+                feedbackData,
+                promoCodesData,
+            ] = await Promise.all([
+                SupabaseService.getClients(),
+                SupabaseService.getProjects(),
+                SupabaseService.getPackages(),
+                SupabaseService.getAddOns(),
+                SupabaseService.getTransactions(),
+                SupabaseService.getCards(),
+                SupabaseService.getFinancialPockets(),
+                SupabaseService.getContracts(),
+                SupabaseService.getClientFeedback(),
+                SupabaseService.getPromoCodes(),
+            ]);
+            setClients(clientsData);
+            setProjects(projectsData);
+            setPackages(packagesData);
+            setAddOns(addOnsData);
+            setTransactions(transactionsData);
+            setCards(cardsData);
+            setPockets(pocketsData);
+            setContracts(contractsData);
+            setClientFeedback(feedbackData);
+            setPromoCodes(promoCodesData);
+        } catch (error) {
+            console.error("Error fetching clients page data:", error);
+            showNotification("Gagal memuat data. Silakan coba lagi.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchData();
+    }, []);
 
     useEffect(() => {
         if (initialAction && initialAction.type === 'VIEW_CLIENT_DETAILS' && initialAction.id) {
@@ -856,7 +899,6 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
 
         if (modalMode === 'add') {
              let clientId = selectedClient?.id;
-             let clientForProject: Client;
              if (!selectedClient) { // New client
                 try {
                     const newClientData: Omit<Client, 'id'> = {
@@ -874,14 +916,11 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
                     const createdClient = await SupabaseService.createClient(newClientData);
                     setClients(prev => [createdClient, ...prev]);
                     clientId = createdClient.id;
-                    clientForProject = createdClient;
                 } catch (error) {
                     console.error('Error creating client:', error);
-                    alert('Gagal membuat klien. Silakan coba lagi.');
+                    showNotification('Gagal membuat klien. Silakan coba lagi.');
                     return;
                 }
-             } else {
-                clientForProject = selectedClient;
              }
              
             const dpAmount = Number(formData.dp) || 0;
@@ -897,7 +936,6 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
 
             const printingCostFromPackage = physicalItemsFromPackage.reduce((sum, item) => sum + item.cost, 0);
 
-            // Create project in Supabase
             try {
                 const newProjectData: Omit<Project, 'id'> = {
                     projectName: formData.projectName,
@@ -927,8 +965,7 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
                 const createdProject = await SupabaseService.createProject(newProjectData);
                 setProjects(prev => [createdProject, ...prev]);
 
-            if (createdProject.amountPaid > 0) {
-                 try {
+                if (createdProject.amountPaid > 0) {
                     const newTransactionData: Omit<Transaction, 'id'> = {
                         date: new Date().toISOString().split('T')[0],
                         description: `DP Proyek ${createdProject.projectName}`,
@@ -941,24 +978,24 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
                     };
                     const createdTransaction = await SupabaseService.createTransaction(newTransactionData);
                     setTransactions(prev => [...prev, createdTransaction].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                    setCards(prev => prev.map(c => c.id === formData.dpDestinationCardId ? {...c, balance: c.balance + createdProject.amountPaid} : c));
-                } catch (error) {
-                    console.error('Error creating transaction:', error);
+
+                    const updatedCard = await SupabaseService.updateCard(formData.dpDestinationCardId, { balance: (cards.find(c => c.id === formData.dpDestinationCardId)?.balance || 0) + createdProject.amountPaid });
+                    setCards(prev => prev.map(c => c.id === formData.dpDestinationCardId ? updatedCard : c));
                 }
-            }
+                if (promoCode) {
+                    const updatedPromo = await SupabaseService.updatePromoCode(promoCode.id, { usageCount: promoCode.usageCount + 1 });
+                    setPromoCodes(prev => prev.map(p => p.id === promoCode.id ? updatedPromo : p));
+                }
+                showNotification(`Klien ${formData.clientName} dan proyek baru berhasil ditambahkan.`);
+
             } catch (error) {
                 console.error('Error creating project:', error);
-                alert('Gagal membuat proyek. Silakan coba lagi.');
+                showNotification('Gagal membuat proyek. Silakan coba lagi.');
                 return;
             }
-             if (promoCode) {
-                setPromoCodes(prev => prev.map(p => p.id === promoCode.id ? { ...p, usageCount: p.usageCount + 1 } : p));
-            }
-            showNotification(`Klien ${formData.clientName} dan proyek baru berhasil ditambahkan.`);
 
         } else if (modalMode === 'edit' && selectedClient && selectedProject) {
             try {
-                // Update client in Supabase
                 const updatedClientData = {
                     name: formData.clientName,
                     email: formData.email,
@@ -970,8 +1007,7 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
                 const updatedClient = await SupabaseService.updateClient(selectedClient.id, updatedClientData);
                 setClients(prev => prev.map(c => c.id === selectedClient.id ? updatedClient : c));
                 
-                // Update project in Supabase
-                const amountPaid = selectedProject.amountPaid; // Keep existing payment data
+                const amountPaid = selectedProject.amountPaid;
                 const remainingPayment = totalProject - amountPaid;
                 const updatedProjectData = {
                     projectName: formData.projectName,
@@ -992,7 +1028,7 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
                 showNotification(`Data klien & proyek berhasil diperbarui.`);
             } catch (error) {
                 console.error('Error updating client/project:', error);
-                alert('Gagal memperbarui data. Silakan coba lagi.');
+                showNotification('Gagal memperbarui data. Silakan coba lagi.');
                 return;
             }
         }
@@ -1004,15 +1040,13 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
         if (window.confirm("Menghapus klien akan menghapus semua proyek dan transaksi terkait. Apakah Anda yakin?")) {
             try {
                 await SupabaseService.deleteClient(clientId);
-                setClients(prev => prev.filter(c => c.id !== clientId));
-                const projectsToDelete = projects.filter(p => p.clientId === clientId).map(p => p.id);
-                setProjects(prev => prev.filter(p => p.clientId !== clientId));
-                setTransactions(prev => prev.filter(t => !projectsToDelete.includes(t.projectId || '')));
+                // Re-fetch data to ensure consistency
+                fetchData();
                 setIsDetailModalOpen(false);
                 showNotification("Klien berhasil dihapus.");
             } catch (error) {
                 console.error('Error deleting client:', error);
-                alert('Gagal menghapus klien. Silakan coba lagi.');
+                showNotification('Gagal menghapus klien. Silakan coba lagi.');
             }
         }
     };
@@ -1032,22 +1066,17 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
                 method: 'Transfer Bank',
                 cardId: destinationCardId,
             };
-            const createdTransaction = await SupabaseService.createTransaction(newTransactionData);
-            setTransactions(prev => [...prev, createdTransaction].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-            setCards(prev => prev.map(c => c.id === destinationCardId ? {...c, balance: c.balance + amount} : c));
-    
-            setProjects(prev => prev.map(p => {
-                if (p.id === project.id) {
-                    const newAmountPaid = p.amountPaid + amount;
-                    const remaining = p.totalCost - newAmountPaid;
-                    return {
-                        ...p,
-                        amountPaid: newAmountPaid,
-                        paymentStatus: remaining <= 0 ? PaymentStatus.LUNAS : PaymentStatus.DP_TERBAYAR
-                    };
-                }
-                return p;
-            }));
+            await SupabaseService.createTransaction(newTransactionData);
+
+            const newAmountPaid = project.amountPaid + amount;
+            const remaining = project.totalCost - newAmountPaid;
+            await SupabaseService.updateProject(projectId, {
+                amountPaid: newAmountPaid,
+                paymentStatus: remaining <= 0 ? PaymentStatus.LUNAS : PaymentStatus.DP_TERBAYAR
+            });
+
+            // Re-fetch all data to ensure UI is up-to-date
+            fetchData();
     
             showNotification('Pembayaran berhasil dicatat.');
             addNotification({
@@ -1061,7 +1090,7 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
             });
         } catch (error) {
             console.error('Error recording payment:', error);
-            alert('Gagal mencatat pembayaran. Silakan coba lagi.');
+            showNotification('Gagal mencatat pembayaran. Silakan coba lagi.');
         }
     };
     
@@ -1098,6 +1127,28 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
         });
     };
     
+    const onSignInvoice = async (projectId: string, signatureDataUrl: string) => {
+        try {
+            const updatedProject = await SupabaseService.updateProject(projectId, { invoiceSignature: signatureDataUrl });
+            setProjects(prev => prev.map(p => p.id === projectId ? updatedProject : p));
+            showNotification('Invoice berhasil ditandatangani.');
+        } catch (error) {
+            console.error('Error signing invoice:', error);
+            showNotification('Gagal menandatangani invoice.');
+        }
+    };
+
+    const onSignTransaction = async (transactionId: string, signatureDataUrl: string) => {
+        try {
+            const updatedTransaction = await SupabaseService.updateTransaction(transactionId, { vendorSignature: signatureDataUrl });
+            setTransactions(prev => prev.map(t => t.id === transactionId ? updatedTransaction : t));
+            showNotification('Kwitansi berhasil ditandatangani.');
+        } catch (error) {
+            console.error('Error signing transaction:', error);
+            showNotification('Gagal menandatangani kwitansi.');
+        }
+    };
+
     const handleSaveSignature = (signatureDataUrl: string) => {
         if (documentToView?.type === 'invoice' && documentToView.project) {
             onSignInvoice(documentToView.project.id, signatureDataUrl);
@@ -1230,6 +1281,17 @@ const Clients: React.FC<ClientsProps> = ({ clients, setClients, projects, setPro
         return null;
     };
     
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-accent mx-auto mb-4"></div>
+                    <p className="text-brand-text-secondary">Memuat data klien...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
             <PageHeader title="Manajemen Klien" subtitle="Kelola semua klien, proyek, dan pembayaran mereka.">

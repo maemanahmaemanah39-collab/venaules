@@ -321,34 +321,69 @@ const CreatePaymentTab: React.FC<CreatePaymentTabProps> = ({
 };
 
 interface FreelancersProps {
-    teamMembers: TeamMember[];
-    setTeamMembers: React.Dispatch<React.SetStateAction<TeamMember[]>>;
-    teamProjectPayments: TeamProjectPayment[];
-    setTeamProjectPayments: React.Dispatch<React.SetStateAction<TeamProjectPayment[]>>;
-    teamPaymentRecords: TeamPaymentRecord[];
-    setTeamPaymentRecords: React.Dispatch<React.SetStateAction<TeamPaymentRecord[]>>;
-    transactions: Transaction[];
-    setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
-    userProfile: Profile;
     showNotification: (message: string) => void;
     initialAction: NavigationAction | null;
     setInitialAction: (action: NavigationAction | null) => void;
-    projects: Project[];
-    setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
-    rewardLedgerEntries: RewardLedgerEntry[];
-    setRewardLedgerEntries: React.Dispatch<React.SetStateAction<RewardLedgerEntry[]>>;
-    pockets: FinancialPocket[];
-    setPockets: React.Dispatch<React.SetStateAction<FinancialPocket[]>>;
-    cards: Card[];
-    setCards: React.Dispatch<React.SetStateAction<Card[]>>;
-    onSignPaymentRecord: (recordId: string, signatureDataUrl: string) => void;
 }
 
 export const Freelancers: React.FC<FreelancersProps> = ({
-    teamMembers, setTeamMembers, teamProjectPayments, setTeamProjectPayments, teamPaymentRecords, setTeamPaymentRecords,
-    transactions, setTransactions, userProfile, showNotification, initialAction, setInitialAction, projects, setProjects,
-    rewardLedgerEntries, setRewardLedgerEntries, pockets, setPockets, cards, setCards, onSignPaymentRecord
+    showNotification, initialAction, setInitialAction
 }) => {
+    const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+    const [teamProjectPayments, setTeamProjectPayments] = useState<TeamProjectPayment[]>([]);
+    const [teamPaymentRecords, setTeamPaymentRecords] = useState<TeamPaymentRecord[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [userProfile, setProfile] = useState<Profile | null>(null);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [rewardLedgerEntries, setRewardLedgerEntries] = useState<RewardLedgerEntry[]>([]);
+    const [pockets, setPockets] = useState<FinancialPocket[]>([]);
+    const [cards, setCards] = useState<Card[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const [
+                    teamMembersData,
+                    teamProjectPaymentsData,
+                    teamPaymentRecordsData,
+                    transactionsData,
+                    profileData,
+                    projectsData,
+                    rewardLedgerEntriesData,
+                    pocketsData,
+                    cardsData,
+                ] = await Promise.all([
+                    SupabaseService.getTeamMembers(),
+                    SupabaseService.getTeamProjectPayments(),
+                    SupabaseService.getTeamPaymentRecords(),
+                    SupabaseService.getTransactions(),
+                    SupabaseService.getProfile(),
+                    SupabaseService.getProjects(),
+                    SupabaseService.getRewardLedgerEntries(),
+                    SupabaseService.getPockets(),
+                    SupabaseService.getCards(),
+                ]);
+
+                setTeamMembers(teamMembersData);
+                setTeamProjectPayments(teamProjectPaymentsData);
+                setTeamPaymentRecords(teamPaymentRecordsData);
+                setTransactions(transactionsData);
+                setProfile(profileData[0] || null);
+                setProjects(projectsData);
+                setRewardLedgerEntries(rewardLedgerEntriesData);
+                setPockets(pocketsData);
+                setCards(cardsData);
+            } catch (error) {
+                console.error("Error fetching freelancers data:", error);
+                showNotification("Gagal memuat data. Silakan coba lagi.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
     const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
@@ -370,6 +405,20 @@ export const Freelancers: React.FC<FreelancersProps> = ({
     const [newNote, setNewNote] = useState('');
     const [newNoteType, setNewNoteType] = useState<PerformanceNoteType>(PerformanceNoteType.GENERAL);
     const [qrModalContent, setQrModalContent] = useState<{ title: string; url: string } | null>(null);
+
+    if (loading || !userProfile) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="text-center">
+                    <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="mt-4 text-brand-text-secondary">Memuat data freelancer...</p>
+                </div>
+            </div>
+        );
+    }
 
     useEffect(() => {
         if (initialAction && initialAction.type === 'VIEW_FREELANCER_DETAILS' && initialAction.id) {
@@ -433,24 +482,19 @@ export const Freelancers: React.FC<FreelancersProps> = ({
         e.preventDefault();
         try {
             if (formMode === 'add') {
-                const newMember: TeamMember = {
-                    ...formData,
-                    id: `TM${Date.now()}`,
-                    rewardBalance: 0,
-                    rating: 0,
-                    performanceNotes: [],
-                    portalAccessId: crypto.randomUUID(),
-                };
-                const createdMember = await SupabaseService.createTeamMember(newMember);
+                // The service/DB will handle defaults for id, rewardBalance, etc.
+                const createdMember = await SupabaseService.createTeamMember(formData);
                 setTeamMembers(prev => [...prev, createdMember]);
-                showNotification(`Freelancer ${newMember.name} berhasil ditambahkan.`);
+                showNotification(`Freelancer ${createdMember.name} berhasil ditambahkan.`);
             } else if (selectedMember) {
+                // The form data only contains the fields from the form,
+                // so merging with selectedMember is correct to preserve other fields.
                 const updatedData = { ...selectedMember, ...formData };
                 const updatedMember = await SupabaseService.updateTeamMember(selectedMember.id, updatedData);
                 setTeamMembers(prev => prev.map(m => m.id === selectedMember.id ? updatedMember : m));
                 showNotification(`Data ${formData.name} berhasil diperbarui.`);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving team member:', error);
             alert('Gagal menyimpan data freelancer. Silakan coba lagi.');
             return;
@@ -498,112 +542,121 @@ export const Freelancers: React.FC<FreelancersProps> = ({
         setDetailTab('create-payment');
     };
 
-    const handlePay = () => {
+    const handlePay = async () => {
         if (!selectedMember || !paymentAmount || paymentAmount <= 0 || !paymentSourceId) {
             alert('Harap isi jumlah dan pilih sumber dana.');
             return;
         }
-        
-        // 1. Create Transaction
-        const newTransaction: Transaction = {
-            id: `TRN-PAY-FR-${Date.now()}`,
-            date: new Date().toISOString().split('T')[0],
-            description: `Pembayaran Gaji Freelancer: ${selectedMember.name} (${projectsToPay.length} proyek)`,
-            amount: paymentAmount,
-            type: TransactionType.EXPENSE,
-            category: 'Gaji Freelancer',
-            method: 'Transfer Bank', // Placeholder, will be overwritten
-        };
-        
-        // 2. Update Card/Pocket Balance
-        if (paymentSourceId.startsWith('card-')) {
-            const cardId = paymentSourceId.replace('card-', '');
-            const card = cards.find(c => c.id === cardId);
-            if (!card || card.balance < paymentAmount) {
-                alert(`Saldo di kartu ${card?.bankName} tidak mencukupi.`); return;
+
+        try {
+            let transactionData: Omit<Transaction, 'id' | 'created_at' | 'updated_at'> = {
+                date: new Date().toISOString().split('T')[0],
+                description: `Pembayaran Gaji Freelancer: ${selectedMember.name} (${projectsToPay.length} proyek)`,
+                amount: paymentAmount,
+                type: TransactionType.EXPENSE,
+                category: 'Gaji Freelancer',
+                method: 'Transfer Bank', // Default
+            };
+
+            if (paymentSourceId.startsWith('card-')) {
+                const cardId = paymentSourceId.replace('card-', '');
+                const card = cards.find(c => c.id === cardId);
+                if (!card || card.balance < paymentAmount) throw new Error(`Saldo di kartu ${card?.bankName} tidak mencukupi.`);
+
+                transactionData.cardId = cardId;
+                transactionData.method = card.cardType === CardType.TUNAI ? 'Tunai' : 'Kartu';
+                const updatedCard = await SupabaseService.updateCard(cardId, { balance: card.balance - paymentAmount });
+                setCards(prev => prev.map(c => c.id === cardId ? updatedCard : c));
+            } else {
+                const pocketId = paymentSourceId.replace('pocket-', '');
+                const pocket = pockets.find(p => p.id === pocketId);
+                if (!pocket || pocket.amount < paymentAmount) throw new Error(`Saldo di kantong ${pocket?.name} tidak mencukupi.`);
+
+                transactionData.pocketId = pocketId;
+                transactionData.method = 'Sistem';
+                const updatedPocket = await SupabaseService.updatePocket(pocketId, { amount: pocket.amount - paymentAmount });
+                setPockets(prev => prev.map(p => p.id === pocketId ? updatedPocket : p));
             }
-            newTransaction.cardId = cardId;
-            newTransaction.method = card.cardType === CardType.TUNAI ? 'Tunai' : 'Kartu';
-            setCards(prev => prev.map(c => c.id === cardId ? {...c, balance: c.balance - paymentAmount} : c));
-        } else { // pocket
-            const pocketId = paymentSourceId.replace('pocket-', '');
-            const pocket = pockets.find(p => p.id === pocketId);
-            if (!pocket || pocket.amount < paymentAmount) {
-                alert(`Saldo di kantong ${pocket?.name} tidak mencukupi.`); return;
-            }
-            newTransaction.pocketId = pocketId;
-            newTransaction.method = 'Sistem';
-            setPockets(prev => prev.map(p => p.id === pocketId ? { ...p, amount: p.amount - paymentAmount } : p));
+
+            const createdTransaction = await SupabaseService.createTransaction(transactionData);
+            setTransactions(prev => [createdTransaction, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+
+            const paymentRecordData = {
+                teamMemberId: selectedMember.id,
+                date: new Date().toISOString().split('T')[0],
+                projectPaymentIds: projectsToPay,
+                totalAmount: paymentAmount,
+                transactionId: createdTransaction.id,
+            };
+            const createdRecord = await SupabaseService.createTeamPaymentRecord(paymentRecordData);
+            setTeamPaymentRecords(prev => [...prev, createdRecord]);
+
+            const updatedPayments = await Promise.all(
+                projectsToPay.map(paymentId => SupabaseService.updateTeamProjectPayment(paymentId, { status: 'Paid' }))
+            );
+            setTeamProjectPayments(prev => prev.map(p => updatedPayments.find(up => up.id === p.id) || p));
+
+            showNotification(`Pembayaran untuk ${selectedMember.name} berhasil dicatat.`);
+            setProjectsToPay([]);
+            setPaymentAmount('');
+            setIsDetailOpen(false);
+
+        } catch (error: any) {
+            console.error('Error creating payment:', error);
+            alert(`Gagal membuat pembayaran: ${error.message}`);
         }
-        
-        // 3. Create Payment Record
-        const newRecord: TeamPaymentRecord = {
-            id: `TPR${Date.now()}`,
-            recordNumber: `PAY-FR-${selectedMember.id.slice(-4)}-${Date.now()}`,
-            teamMemberId: selectedMember.id,
-            date: new Date().toISOString().split('T')[0],
-            projectPaymentIds: projectsToPay,
-            totalAmount: paymentAmount
-        };
-
-        // 4. Update Project Payment Status
-        setTeamProjectPayments(prev => prev.map(p => projectsToPay.includes(p.id) ? { ...p, status: 'Paid' } : p));
-        
-        setTransactions(prev => [...prev, newTransaction].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-        setTeamPaymentRecords(prev => [...prev, newRecord]);
-
-        showNotification(`Pembayaran untuk ${selectedMember.name} sebesar ${formatCurrency(paymentAmount)} berhasil dicatat.`);
-        
-        setProjectsToPay([]);
-        setPaymentAmount('');
-        setIsDetailOpen(false);
     };
 
-    const handleWithdrawRewards = () => {
+    const handleWithdrawRewards = async () => {
         if (!selectedMember || selectedMember.rewardBalance <= 0) return;
 
         if (window.confirm(`Anda akan menarik saldo hadiah sebesar ${formatCurrency(selectedMember.rewardBalance)} untuk ${selectedMember.name}. Lanjutkan?`)) {
-            const withdrawalAmount = selectedMember.rewardBalance;
-            const sourceCard = cards.find(c => c.id !== 'CARD_CASH') || cards[0];
-            if (!sourceCard || sourceCard.balance < withdrawalAmount) {
-                alert(`Saldo di kartu sumber (${sourceCard.bankName}) tidak mencukupi untuk penarikan hadiah.`);
-                return;
+            try {
+                const withdrawalAmount = selectedMember.rewardBalance;
+                const sourceCard = cards.find(c => c.id !== 'CARD_CASH') || cards[0];
+                if (!sourceCard) throw new Error("Tidak ada kartu sumber yang valid untuk penarikan.");
+                if (sourceCard.balance < withdrawalAmount) throw new Error(`Saldo di kartu sumber (${sourceCard.bankName}) tidak mencukupi.`);
+
+                const withdrawalTxData = {
+                    date: new Date().toISOString().split('T')[0],
+                    description: `Penarikan saldo hadiah oleh ${selectedMember.name}`,
+                    amount: withdrawalAmount,
+                    type: TransactionType.EXPENSE,
+                    category: 'Penarikan Hadiah Freelancer',
+                    method: 'Transfer Bank',
+                    cardId: sourceCard.id,
+                };
+                const createdTx = await SupabaseService.createTransaction(withdrawalTxData);
+                setTransactions(prev => [createdTx, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+
+                const ledgerEntryData = {
+                    teamMemberId: selectedMember.id,
+                    date: createdTx.date,
+                    description: createdTx.description,
+                    amount: -withdrawalAmount,
+                    transactionId: createdTx.id,
+                };
+                const createdLedgerEntry = await SupabaseService.createRewardLedgerEntry(ledgerEntryData);
+                setRewardLedgerEntries(prev => [...prev, createdLedgerEntry].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+
+                const updatedCard = await SupabaseService.updateCard(sourceCard.id, { balance: sourceCard.balance - withdrawalAmount });
+                setCards(prev => prev.map(c => c.id === updatedCard.id ? updatedCard : c));
+
+                const updatedMember = await SupabaseService.updateTeamMember(selectedMember.id, { rewardBalance: 0 });
+                setTeamMembers(prev => prev.map(m => m.id === updatedMember.id ? updatedMember : m));
+
+                const rewardPocket = pockets.find(p => p.type === PocketType.REWARD_POOL);
+                if (rewardPocket) {
+                    const updatedPocket = await SupabaseService.updatePocket(rewardPocket.id, { amount: rewardPocket.amount - withdrawalAmount });
+                    setPockets(prev => prev.map(p => p.id === updatedPocket.id ? updatedPocket : p));
+                }
+
+                showNotification(`Penarikan hadiah untuk ${selectedMember.name} berhasil.`);
+                setIsDetailOpen(false);
+            } catch (error: any) {
+                console.error('Error withdrawing rewards:', error);
+                alert(`Gagal menarik hadiah: ${error.message}`);
             }
-
-            // 1. Create transaction for the withdrawal
-            const withdrawalTx: Transaction = {
-                id: `TRN-RWD-WTH-${Date.now()}`,
-                date: new Date().toISOString().split('T')[0],
-                description: `Penarikan saldo hadiah oleh ${selectedMember.name}`,
-                amount: withdrawalAmount,
-                type: TransactionType.EXPENSE,
-                category: 'Penarikan Hadiah Freelancer',
-                method: 'Transfer Bank',
-                cardId: sourceCard.id,
-            };
-
-            // 2. Create a negative entry in the reward ledger
-            const ledgerEntry: RewardLedgerEntry = {
-                id: `RLE-${withdrawalTx.id}`,
-                teamMemberId: selectedMember.id,
-                date: withdrawalTx.date,
-                description: withdrawalTx.description,
-                amount: -withdrawalAmount,
-            };
-
-            // 3. Update states
-            setTransactions(prev => [...prev, withdrawalTx].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-            setRewardLedgerEntries(prev => [...prev, ledgerEntry].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-            setCards(prev => prev.map(c => c.id === sourceCard.id ? { ...c, balance: c.balance - withdrawalAmount } : c));
-            setTeamMembers(prev => prev.map(m => m.id === selectedMember.id ? { ...m, rewardBalance: 0 } : m));
-            
-            const rewardPocket = pockets.find(p => p.type === PocketType.REWARD_POOL);
-            if (rewardPocket) {
-                setPockets(prev => prev.map(p => p.id === rewardPocket.id ? { ...p, amount: p.amount - withdrawalAmount } : p));
-            }
-
-            showNotification(`Penarikan hadiah untuk ${selectedMember.name} berhasil.`);
-            setIsDetailOpen(false);
         }
     };
 
@@ -613,14 +666,20 @@ export const Freelancers: React.FC<FreelancersProps> = ({
     }, [teamProjectPayments, selectedMember]);
     
     // Performance Tab Handlers
-    const handleSetRating = (rating: number) => {
+    const handleSetRating = async (rating: number) => {
         if (!selectedMember) return;
-        setTeamMembers(prev => prev.map(m => m.id === selectedMember.id ? { ...m, rating } : m));
-        // Also update the selectedMember state to reflect change in the modal
-        setSelectedMember(prev => prev ? { ...prev, rating } : null);
+        try {
+            const updatedMember = await SupabaseService.updateTeamMember(selectedMember.id, { rating });
+            setTeamMembers(prev => prev.map(m => m.id === selectedMember.id ? updatedMember : m));
+            setSelectedMember(updatedMember);
+            showNotification('Rating berhasil diperbarui.');
+        } catch (error: any) {
+            console.error('Error updating rating:', error);
+            alert('Gagal memperbarui rating.');
+        }
     };
 
-    const handleAddNote = () => {
+    const handleAddNote = async () => {
         if (!selectedMember || !newNote.trim()) return;
         const note: PerformanceNote = {
             id: `PN-${Date.now()}`,
@@ -629,25 +688,46 @@ export const Freelancers: React.FC<FreelancersProps> = ({
             type: newNoteType
         };
         const updatedNotes = [...selectedMember.performanceNotes, note];
-        setTeamMembers(prev => prev.map(m => m.id === selectedMember.id ? { ...m, performanceNotes: updatedNotes } : m));
-        setSelectedMember(prev => prev ? { ...prev, performanceNotes: updatedNotes } : null);
-        setNewNote('');
-        setNewNoteType(PerformanceNoteType.GENERAL);
+        try {
+            const updatedMember = await SupabaseService.updateTeamMember(selectedMember.id, { performanceNotes: updatedNotes });
+            setTeamMembers(prev => prev.map(m => m.id === selectedMember.id ? updatedMember : m));
+            setSelectedMember(updatedMember);
+            setNewNote('');
+            setNewNoteType(PerformanceNoteType.GENERAL);
+            showNotification('Catatan kinerja berhasil ditambahkan.');
+        } catch (error: any) {
+            console.error('Error adding performance note:', error);
+            alert('Gagal menambahkan catatan.');
+        }
     };
 
-    const handleDeleteNote = (noteId: string) => {
+    const handleDeleteNote = async (noteId: string) => {
         if (!selectedMember) return;
         const updatedNotes = selectedMember.performanceNotes.filter(n => n.id !== noteId);
-        setTeamMembers(prev => prev.map(m => m.id === selectedMember.id ? { ...m, performanceNotes: updatedNotes } : m));
-        setSelectedMember(prev => prev ? { ...prev, performanceNotes: updatedNotes } : null);
+        try {
+            const updatedMember = await SupabaseService.updateTeamMember(selectedMember.id, { performanceNotes: updatedNotes });
+            setTeamMembers(prev => prev.map(m => m.id === selectedMember.id ? updatedMember : m));
+            setSelectedMember(updatedMember);
+            showNotification('Catatan kinerja berhasil dihapus.');
+        } catch (error: any) {
+            console.error('Error deleting performance note:', error);
+            alert('Gagal menghapus catatan.');
+        }
     };
 
     const monthlyBudgetPocket = useMemo(() => pockets.find(p => p.type === PocketType.EXPENSE), [pockets]);
 
-    const handleSaveSignature = (signatureDataUrl: string) => {
+    const handleSaveSignature = async (signatureDataUrl: string) => {
         if (paymentSlipToView) {
-            onSignPaymentRecord(paymentSlipToView.id, signatureDataUrl);
-            setPaymentSlipToView(prev => prev ? { ...prev, vendorSignature: signatureDataUrl } : null);
+            try {
+                const updatedRecord = await SupabaseService.updateTeamPaymentRecord(paymentSlipToView.id, { vendorSignature: signatureDataUrl });
+                setTeamPaymentRecords(prev => prev.map(r => r.id === updatedRecord.id ? updatedRecord : r));
+                setPaymentSlipToView(updatedRecord);
+                showNotification('Tanda tangan berhasil disimpan.');
+            } catch (error: any) {
+                console.error('Error saving signature:', error);
+                alert('Gagal menyimpan tanda tangan.');
+            }
         }
         setIsSignatureModalOpen(false);
     };

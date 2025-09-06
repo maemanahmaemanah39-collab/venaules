@@ -53,19 +53,51 @@ const getSignatureStatus = (contract: Contract) => {
 
 
 interface ContractsProps {
-    contracts: Contract[];
-    setContracts: React.Dispatch<React.SetStateAction<Contract[]>>;
-    clients: Client[];
-    projects: Project[];
-    profile: Profile;
     showNotification: (message: string) => void;
     initialAction: NavigationAction | null;
     setInitialAction: (action: NavigationAction | null) => void;
-    packages: Package[];
-    onSignContract: (contractId: string, signatureDataUrl: string, signer: 'vendor' | 'client') => void;
 }
 
-const Contracts: React.FC<ContractsProps> = ({ contracts, setContracts, clients, projects, profile, showNotification, initialAction, setInitialAction, packages, onSignContract }) => {
+const Contracts: React.FC<ContractsProps> = ({ showNotification, initialAction, setInitialAction }) => {
+    const [contracts, setContracts] = useState<Contract[]>([]);
+    const [clients, setClients] = useState<Client[]>([]);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [profile, setProfile] = useState<Profile | null>(null);
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const [
+                    contractsData,
+                    clientsData,
+                    projectsData,
+                    profileData,
+                    packagesData,
+                ] = await Promise.all([
+                    SupabaseService.getContracts(),
+                    SupabaseService.getClients(),
+                    SupabaseService.getProjects(),
+                    SupabaseService.getProfile(),
+                    SupabaseService.getPackages(),
+                ]);
+
+                setContracts(contractsData);
+                setClients(clientsData);
+                setProjects(projectsData);
+                setProfile(profileData[0] || null);
+                setPackages(packagesData);
+            } catch (error) {
+                console.error("Error fetching contracts data:", error);
+                showNotification("Gagal memuat data kontrak.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
     const [isFormModalOpen, setIsFormModalOpen] = useState(false);
     const [isViewModalOpen, setIsViewModalOpen] = useState(false);
     const [modalMode, setModalMode] = useState<'add' | 'edit' | 'view'>('add');
@@ -80,6 +112,20 @@ const Contracts: React.FC<ContractsProps> = ({ contracts, setContracts, clients,
     
     const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
     
+    if (loading || !profile) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="text-center">
+                    <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="mt-4 text-brand-text-secondary">Memuat data kontrak...</p>
+                </div>
+            </div>
+        );
+    }
+
     useEffect(() => {
         if (qrModalContent) {
             const qrCodeContainer = document.getElementById('contract-portal-qrcode');
@@ -241,10 +287,17 @@ const Contracts: React.FC<ContractsProps> = ({ contracts, setContracts, clients,
         }
     };
     
-    const handleSaveSignature = (signatureDataUrl: string) => {
+    const handleSaveSignature = async (signatureDataUrl: string) => {
         if (selectedContract) {
-            onSignContract(selectedContract.id, signatureDataUrl, 'vendor');
-            setSelectedContract(prev => prev ? { ...prev, vendorSignature: signatureDataUrl } : null);
+            try {
+                const updatedContract = await SupabaseService.updateContract(selectedContract.id, { vendorSignature: signatureDataUrl });
+                setContracts(prev => prev.map(c => c.id === updatedContract.id ? updatedContract : c));
+                setSelectedContract(updatedContract);
+                showNotification('Tanda tangan berhasil disimpan.');
+            } catch (error: any) {
+                console.error('Error saving signature:', error);
+                showNotification('Gagal menyimpan tanda tangan.');
+            }
         }
         setIsSignatureModalOpen(false);
     };

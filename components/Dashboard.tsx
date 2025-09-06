@@ -312,25 +312,100 @@ const AssetSummaryWidget: React.FC<{ assets: Asset[]; handleNavigation: (view: V
 // --- Main Dashboard Component ---
 
 interface DashboardProps {
-  projects: Project[];
-  clients: Client[];
-  transactions: Transaction[];
-  teamMembers: TeamMember[];
-  cards: Card[];
-  pockets: FinancialPocket[];
   handleNavigation: (view: ViewType, action?: NavigationAction) => void;
-  leads: Lead[];
-  teamProjectPayments: TeamProjectPayment[];
-  packages: Package[];
-  assets: Asset[];
-  clientFeedback: ClientFeedback[];
-  contracts: Contract[];
   currentUser: User | null;
-  projectStatusConfig: ProjectStatusConfig[];
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ projects, clients, transactions, teamMembers, cards, pockets, handleNavigation, leads, teamProjectPayments, packages, assets, clientFeedback, contracts, currentUser, projectStatusConfig }) => {
+const Dashboard: React.FC<DashboardProps> = ({ handleNavigation, currentUser }) => {
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [clients, setClients] = useState<Client[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+    const [cards, setCards] = useState<Card[]>([]);
+    const [pockets, setPockets] = useState<FinancialPocket[]>([]);
+    const [leads, setLeads] = useState<Lead[]>([]);
+    const [teamProjectPayments, setTeamProjectPayments] = useState<TeamProjectPayment[]>([]);
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [assets, setAssets] = useState<Asset[]>([]);
+    const [clientFeedback, setClientFeedback] = useState<ClientFeedback[]>([]);
+    const [contracts, setContracts] = useState<Contract[]>([]);
+    const [projectStatusConfig, setProjectStatusConfig] = useState<ProjectStatusConfig[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                // Fetch profile first to get projectStatusConfig
+                const profileData = await SupabaseService.getProfile();
+                const config = profileData[0]?.projectStatusConfig || [];
+                setProjectStatusConfig(config);
+
+                const [
+                    projectsData,
+                    clientsData,
+                    transactionsData,
+                    teamMembersData,
+                    cardsData,
+                    pocketsData,
+                    leadsData,
+                    teamProjectPaymentsData,
+                    packagesData,
+                    assetsData,
+                    clientFeedbackData,
+                    contractsData,
+                ] = await Promise.all([
+                    SupabaseService.getProjects(),
+                    SupabaseService.getClients(),
+                    SupabaseService.getTransactions(),
+                    SupabaseService.getTeamMembers(),
+                    SupabaseService.getCards(),
+                    SupabaseService.getPockets(),
+                    SupabaseService.getLeads(),
+                    SupabaseService.getTeamProjectPayments(),
+                    SupabaseService.getPackages(),
+                    SupabaseService.getAssets(),
+                    SupabaseService.getClientFeedback(),
+                    SupabaseService.getContracts(),
+                ]);
+
+                setProjects(projectsData);
+                setClients(clientsData);
+                setTransactions(transactionsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+                setTeamMembers(teamMembersData);
+                setCards(cardsData);
+                setPockets(pocketsData);
+                setLeads(leadsData);
+                setTeamProjectPayments(teamProjectPaymentsData);
+                setPackages(packagesData);
+                setAssets(assetsData);
+                setClientFeedback(clientFeedbackData);
+                setContracts(contractsData);
+
+            } catch (error) {
+                console.error("Error fetching dashboard data:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, []);
   const [activeModal, setActiveModal] = useState<'balance' | 'projects' | 'clients' | 'freelancers' | 'payments' | 'contracts' | null>(null);
+
+  if (loading) {
+    return (
+        <div className="flex justify-center items-center h-screen">
+            <div className="text-center">
+                <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p className="mt-4 text-brand-text-secondary">Memuat dasbor...</p>
+            </div>
+        </div>
+    );
+  }
   
   const getSubStatusDisplay = (project: Project) => {
     if (project.activeSubStatuses?.length) {

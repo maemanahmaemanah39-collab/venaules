@@ -229,6 +229,12 @@ class SupabaseService {
     return data ? this.mapProfileFromDB(data) : null
   }
 
+  static async getPrimaryProfile(): Promise<Profile | null> {
+    const { data, error } = await supabase.from('profiles').select('*').limit(1).single()
+    if (error && error.code !== 'PGRST116') throw error
+    return data ? this.mapProfileFromDB(data) : null
+  }
+
   static async createProfile(profile: Omit<Profile, 'id'>): Promise<Profile> {
     const { data, error } = await supabase
       .from('profiles')
@@ -291,6 +297,17 @@ class SupabaseService {
   static async deleteClient(id: string): Promise<void> {
     const { error } = await supabase.from('clients').delete().eq('id', id)
     if (error) throw error
+  }
+
+  static async getClientByPortalId(portalId: string): Promise<Client | null> {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('portal_access_id', portalId)
+      .single()
+
+    if (error && error.code !== 'PGRST116') throw error // PGRST116 means no rows found, which is not an error here
+    return data ? this.mapClientFromDB(data) : null
   }
 
   // Packages
@@ -406,6 +423,16 @@ class SupabaseService {
   static async deleteProject(id: string): Promise<void> {
     const { error } = await supabase.from('projects').delete().eq('id', id)
     if (error) throw error
+  }
+
+  static async getProjectsByClientId(clientId: string): Promise<Project[]> {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('client_id', clientId)
+
+    if (error) throw error
+    return data?.map(this.mapProjectFromDB) || []
   }
 
   // Similar methods for all other entities...
@@ -664,6 +691,12 @@ class SupabaseService {
   static async deleteContract(id: string): Promise<void> {
     const { error } = await supabase.from('contracts').delete().eq('id', id)
     if (error) throw error
+  }
+
+  static async getContractsByClientId(clientId:string): Promise<Contract[]> {
+      const { data, error } = await supabase.from('contracts').select('*').eq('client_id', clientId);
+      if (error) throw error;
+      return data?.map(this.mapContractFromDB) || [];
   }
 
   // Client Feedback

@@ -1,6 +1,5 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
-import { Project, PaymentStatus, TeamMember, Client, Package, TeamProjectPayment, Transaction, TransactionType, AssignedTeamMember, Profile, Revision, RevisionStatus, NavigationAction, AddOn, PrintingItem, Card, ProjectStatusConfig, SubStatusConfig } from '../types';
+import { Project, PaymentStatus, TeamMember, Client, Package, TeamProjectPayment, Transaction, TransactionType, AssignedTeamMember, Profile, Revision, RevisionStatus, NavigationAction, AddOn, PrintingItem, Card, ProjectStatusConfig, SubStatusConfig, Notification } from '../types';
 import PageHeader from './PageHeader';
 import Modal from './Modal';
 import StatCard from './StatCard';
@@ -580,7 +579,7 @@ interface ProjectDetailModalProps {
     clients: Client[];
     profile: Profile;
     showNotification: (message: string) => void;
-    setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
+    onUpdateProject: (projectId: string, updates: Partial<Project>) => Promise<Project | null>;
     onClose: () => void;
     handleOpenForm: (mode: 'edit', project: Project) => void;
     handleProjectDelete: (projectId: string) => void;
@@ -591,7 +590,7 @@ interface ProjectDetailModalProps {
     teamProjectPayments: TeamProjectPayment[];
 }
 
-const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ selectedProject, setSelectedProject, teamMembers, clients, profile, showNotification, setProjects, onClose, handleOpenForm, handleProjectDelete, handleOpenBriefingModal, handleOpenConfirmationModal, packages, transactions, teamProjectPayments }) => {
+const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ selectedProject, setSelectedProject, teamMembers, clients, profile, showNotification, onUpdateProject, onClose, handleOpenForm, handleProjectDelete, handleOpenBriefingModal, handleOpenConfirmationModal, packages, transactions, teamProjectPayments }) => {
     const [detailTab, setDetailTab] = useState<'details' | 'revisions' | 'files' | 'laba-rugi'>('details');
     const [newRevision, setNewRevision] = useState({ adminNotes: '', deadline: '', freelancerId: '' });
 
@@ -607,7 +606,7 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ selectedProject
         }, {} as Record<string, AssignedTeamMember[]>);
     }, [selectedProject?.team]);
 
-    const handleAddRevision = (e: React.FormEvent) => {
+    const handleAddRevision = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedProject || !newRevision.freelancerId || !newRevision.adminNotes || !newRevision.deadline) {
             showNotification('Harap lengkapi semua field revisi.');
@@ -623,13 +622,14 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ selectedProject
             status: RevisionStatus.PENDING,
         };
         
-        const updatedProject = { ...selectedProject, revisions: [...(selectedProject.revisions || []), revisionToAdd] };
+        const updatedRevisions = [...(selectedProject.revisions || []), revisionToAdd];
+        const updatedProject = await onUpdateProject(selectedProject.id, { revisions: updatedRevisions });
 
-        setProjects(prevProjects => prevProjects.map(p => p.id === selectedProject.id ? updatedProject : p));
-        setSelectedProject(updatedProject);
-
-        showNotification('Revisi baru berhasil ditambahkan.');
-        setNewRevision({ adminNotes: '', deadline: '', freelancerId: '' });
+        if (updatedProject) {
+            setSelectedProject(updatedProject);
+            showNotification('Revisi baru berhasil ditambahkan.');
+            setNewRevision({ adminNotes: '', deadline: '', freelancerId: '' });
+        }
     };
 
     const handleShareRevisionLink = (revision: Revision) => {
@@ -650,7 +650,7 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ selectedProject
         });
     };
     
-    const handleToggleDigitalItem = (itemText: string) => {
+    const handleToggleDigitalItem = async (itemText: string) => {
         if (!selectedProject) return;
 
         const currentCompleted = selectedProject.completedDigitalItems || [];
@@ -659,10 +659,10 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ selectedProject
             ? currentCompleted.filter(item => item !== itemText)
             : [...currentCompleted, itemText];
 
-        const updatedProject = { ...selectedProject, completedDigitalItems: newCompleted };
-
-        setProjects(prevProjects => prevProjects.map(p => p.id === selectedProject.id ? updatedProject : p));
-        setSelectedProject(updatedProject); // Update local state for immediate UI feedback in the modal
+        const updatedProject = await onUpdateProject(selectedProject.id, { completedDigitalItems: newCompleted });
+        if (updatedProject) {
+            setSelectedProject(updatedProject);
+        }
     };
     
     if (!selectedProject) return null;
@@ -948,21 +948,11 @@ const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({ selectedProject
 
 
 interface ProjectsProps {
-    projects: Project[];
-    setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
-    clients: Client[];
-    packages: Package[];
-    teamMembers: TeamMember[];
-    teamProjectPayments: TeamProjectPayment[];
-    setTeamProjectPayments: React.Dispatch<React.SetStateAction<TeamProjectPayment[]>>;
-    transactions: Transaction[];
-    setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
     initialAction: NavigationAction | null;
     setInitialAction: (action: NavigationAction | null) => void;
     profile: Profile;
     showNotification: (message: string) => void;
-    cards: Card[];
-    setCards: React.Dispatch<React.SetStateAction<Card[]>>;
+    addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'isRead'>) => void;
 }
 
 const ConfirmationModal: React.FC<{
@@ -971,9 +961,9 @@ const ConfirmationModal: React.FC<{
     isFollowUp: boolean;
     clients: Client[];
     teamMembers: TeamMember[];
-    setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
+    onConfirm: (project: Partial<Project>) => void;
     onClose: () => void;
-}> = ({ project, subStatus, isFollowUp, clients, teamMembers, setProjects, onClose }) => {
+}> = ({ project, subStatus, isFollowUp, clients, teamMembers, onConfirm, onClose }) => {
     const [recipientId, setRecipientId] = useState<string>('');
     const [message, setMessage] = useState('');
 
@@ -1052,23 +1042,16 @@ Salam hangat,
         }
 
         if (phoneNumber) {
-            // Update project state with the timestamp
-            setProjects(prev => prev.map(p => {
-                if (p.id === project.id) {
-                    const newConfirmationSentAt = {
-                        ...(p.subStatusConfirmationSentAt || {}),
-                        [subStatus.name]: new Date().toISOString(),
-                    };
-                    return { ...p, subStatusConfirmationSentAt: newConfirmationSentAt };
-                }
-                return p;
-            }));
+            const newConfirmationSentAt = {
+                ...(project.subStatusConfirmationSentAt || {}),
+                [subStatus.name]: new Date().toISOString(),
+            };
+            onConfirm({ subStatusConfirmationSentAt: newConfirmationSentAt });
 
-            // Open WhatsApp
             const cleanedNumber = phoneNumber.replace(/[^0-9]/g, '');
             const whatsappUrl = `https://wa.me/${cleanedNumber}?text=${encodeURIComponent(message)}`;
             window.open(whatsappUrl, '_blank');
-            onClose(); // Close modal after sharing
+            onClose();
         } else {
             alert('Nomor telepon untuk penerima ini tidak ditemukan.');
         }
@@ -1108,7 +1091,16 @@ Salam hangat,
     );
 };
 
-export const Projects: React.FC<ProjectsProps> = ({ projects, setProjects, clients, packages, teamMembers, teamProjectPayments, setTeamProjectPayments, transactions, setTransactions, initialAction, setInitialAction, profile, showNotification, cards, setCards }) => {
+export const Projects: React.FC<ProjectsProps> = ({ initialAction, setInitialAction, profile, showNotification, addNotification }) => {
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [clients, setClients] = useState<Client[]>([]);
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+    const [teamProjectPayments, setTeamProjectPayments] = useState<TeamProjectPayment[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [cards, setCards] = useState<Card[]>([]);
+    const [loading, setLoading] = useState(true);
+
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string | 'all'>('all');
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -1165,6 +1157,44 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setProjects, clien
 
     const [confirmationModalState, setConfirmationModalState] = useState<{ project: Project; subStatus: SubStatusConfig; isFollowUp: boolean; } | null>(null);
 
+    const fetchData = async () => {
+        setLoading(true);
+        try {
+            const [
+                projectsData,
+                clientsData,
+                packagesData,
+                teamMembersData,
+                teamProjectPaymentsData,
+                transactionsData,
+                cardsData,
+            ] = await Promise.all([
+                SupabaseService.getProjects(),
+                SupabaseService.getClients(),
+                SupabaseService.getPackages(),
+                SupabaseService.getTeamMembers(),
+                SupabaseService.getTeamProjectPayments(),
+                SupabaseService.getTransactions(),
+                SupabaseService.getCards(),
+            ]);
+            setProjects(projectsData.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            setClients(clientsData);
+            setPackages(packagesData);
+            setTeamMembers(teamMembersData);
+            setTeamProjectPayments(teamProjectPaymentsData);
+            setTransactions(transactionsData);
+            setCards(cardsData);
+        } catch (error) {
+            console.error("Error fetching projects page data:", error);
+            showNotification("Gagal memuat data proyek. Silakan coba lagi.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchData();
+    }, []);
 
     const handleOpenDetailModal = (project: Project) => {
         setSelectedProject(project);
@@ -1397,226 +1427,141 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setProjects, clien
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        let projectData: Project;
+        try {
+            if (formMode === 'edit') {
+                // handleUpdateProject updates the project and returns the updated object,
+                // and also updates the local `projects` state.
+                const updatedProject = await handleUpdateProject(formData.id, formData);
+                if (!updatedProject) {
+                    // handleUpdateProject shows its own notification on failure
+                    return;
+                }
 
-        if (formMode === 'add') {
-             projectData = {
-                ...initialFormState,
-                ...formData,
-                id: `PRJ${Date.now()}`,
-                progress: 0,
-                totalCost: 0, // Will be set on client page
-                amountPaid: 0,
-                paymentStatus: PaymentStatus.BELUM_BAYAR,
-                packageId: '',
-                addOns: [],
-            };
-        } else { // edit mode
-            const originalProject = projects.find(p => p.id === formData.id);
-            if (!originalProject) return; 
-            projectData = { ...originalProject, ...formData };
-            
-            const paymentCardId = cards.find(c => c.id !== 'CARD_CASH')?.id;
-            if (!paymentCardId) {
-                showNotification("Tidak ada kartu pembayaran untuk mencatat pengeluaran.");
-            } else {
-                let tempTransactions = [...transactions];
-                let tempCards = [...cards];
-                const fieldsToProcess: ('printingCost' | 'transportCost')[] = [];
+                // Note: This logic creates/updates payments but does not delete them if a member is removed.
+                // This preserves the original app's behavior.
+                const paymentPromises = updatedProject.team.map(teamMember => {
+                    const paymentEntry: TeamProjectPayment = {
+                        id: `TPP-${updatedProject.id}-${teamMember.memberId}`,
+                        projectId: updatedProject.id,
+                        teamMemberName: teamMember.name,
+                        teamMemberId: teamMember.memberId,
+                        date: updatedProject.date,
+                        status: 'Unpaid',
+                        fee: teamMember.fee,
+                        reward: teamMember.reward || 0,
+                    };
+                    return SupabaseService.createTeamProjectPayment(paymentEntry)
+                        .catch(() => SupabaseService.updateTeamProjectPayment(paymentEntry.id, paymentEntry));
+                });
+                const updatedPayments = await Promise.all(paymentPromises);
 
-                if (originalProject.printingCost !== projectData.printingCost) fieldsToProcess.push('printingCost');
-                if (originalProject.transportCost !== projectData.transportCost) fieldsToProcess.push('transportCost');
-
-                fieldsToProcess.forEach(field => {
-                    const cost = projectData[field] || 0;
-                    const category = field === 'printingCost' ? 'Cetak Album' : 'Transportasi';
-                    const description = field === 'printingCost' ? `Biaya Cetak - ${projectData.projectName}` : `Biaya Transportasi - ${projectData.projectName}`;
-                    const txId = `TRN-COST-${field.replace('Cost','')}-${projectData.id}`;
-                    
-                    const existingTxIndex = tempTransactions.findIndex(t => t.id === txId);
-
-                    if (existingTxIndex > -1) {
-                        const oldAmount = tempTransactions[existingTxIndex].amount;
-                        if (cost > 0) {
-                            tempTransactions[existingTxIndex].amount = cost;
-                            const diff = cost - oldAmount;
-                            tempCards = tempCards.map(c => c.id === paymentCardId ? { ...c, balance: c.balance - diff } : c);
-                        } else {
-                            tempTransactions.splice(existingTxIndex, 1);
-                            tempCards = tempCards.map(c => c.id === paymentCardId ? { ...c, balance: c.balance + oldAmount } : c);
-                        }
-                    } else if (cost > 0) {
-                        const newTx: Transaction = {
-                            id: txId, date: new Date().toISOString().split('T')[0], description, amount: cost,
-                            type: TransactionType.EXPENSE, projectId: projectData.id, category,
-                            method: 'Sistem', cardId: paymentCardId,
-                        };
-                        tempTransactions.push(newTx);
-                        tempCards = tempCards.map(c => c.id === paymentCardId ? { ...c, balance: c.balance - cost } : c);
-                    }
+                // Update local state for payments
+                setTeamProjectPayments(prev => {
+                    const otherPayments = prev.filter(p => p.projectId !== updatedProject.id);
+                    return [...otherPayments, ...updatedPayments];
                 });
 
-                setTransactions(tempTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                setCards(tempCards);
-            }
-        }
-        
-        const allTeamMembersOnProject = projectData.team;
-        const otherProjectPayments = teamProjectPayments.filter(p => p.projectId !== projectData.id);
-        const newProjectPaymentEntries: TeamProjectPayment[] = allTeamMembersOnProject.map(teamMember => ({
-            id: `TPP-${projectData.id}-${teamMember.memberId}`,
-            projectId: projectData.id,
-            teamMemberName: teamMember.name,
-            teamMemberId: teamMember.memberId,
-            date: projectData.date,
-            status: 'Unpaid',
-            fee: teamMember.fee,
-            reward: teamMember.reward || 0,
-        }));
-        setTeamProjectPayments([...otherProjectPayments, ...newProjectPaymentEntries]);
+                showNotification(`Proyek "${updatedProject.projectName}" berhasil diperbarui.`);
 
-        try {
-            if (formMode === 'add') {
-                const createdProject = await SupabaseService.createProject(projectData);
+            } else { // 'add' mode
+                const { id, clientName, ...newProjectPayload } = formData;
+                const createdProject = await SupabaseService.createProject(newProjectPayload);
                 setProjects(prev => [createdProject, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                showNotification(`Proyek "${projectData.projectName}" berhasil dibuat.`);
-            } else {
-                const updatedProject = await SupabaseService.updateProject(projectData.id, projectData);
-                setProjects(prev => prev.map(p => p.id === projectData.id ? updatedProject : p).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                showNotification(`Proyek "${projectData.projectName}" berhasil diperbarui.`);
+
+                if (createdProject.team && createdProject.team.length > 0) {
+                    const paymentPromises = createdProject.team.map(teamMember => {
+                         const paymentEntry: Omit<TeamProjectPayment, 'id' | 'created_at' | 'updated_at'> = {
+                            projectId: createdProject.id,
+                            teamMemberName: teamMember.name,
+                            teamMemberId: teamMember.memberId,
+                            date: createdProject.date,
+                            status: 'Unpaid',
+                            fee: teamMember.fee,
+                            reward: teamMember.reward || 0,
+                        };
+                        return SupabaseService.createTeamProjectPayment(paymentEntry);
+                    });
+                    const newPayments = await Promise.all(paymentPromises);
+                    setTeamProjectPayments(prev => [...prev, ...newPayments]);
+                }
+
+                showNotification(`Proyek "${createdProject.projectName}" berhasil dibuat.`);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving project:', error);
-            alert('Gagal menyimpan proyek. Silakan coba lagi.');
-            return;
+            showNotification(`Gagal menyimpan proyek: ${error.message}`);
         }
         handleCloseForm();
     };
 
     const handleProjectDelete = async (projectId: string) => {
-        if (window.confirm("Apakah Anda yakin ingin menghapus proyek ini? Semua data terkait (termasuk tugas tim dan transaksi) akan dihapus.")) {
+        if (window.confirm("Apakah Anda yakin ingin menghapus proyek ini? Semua data terkait akan dihapus.")) {
             try {
                 await SupabaseService.deleteProject(projectId);
                 setProjects(prev => prev.filter(p => p.id !== projectId));
-                setTeamProjectPayments(prev => prev.filter(fp => fp.projectId !== projectId));
-                setTransactions(prev => prev.filter(t => t.projectId !== projectId));
                 showNotification('Proyek berhasil dihapus.');
             } catch (error) {
                 console.error('Error deleting project:', error);
-                alert('Gagal menghapus proyek. Silakan coba lagi.');
+                showNotification('Gagal menghapus proyek. Silakan coba lagi.');
             }
         }
     };
     
+    const handleUpdateProject = async (projectId: string, updates: Partial<Project>) => {
+        try {
+            const updatedProject = await SupabaseService.updateProject(projectId, updates);
+            setProjects(prev => prev.map(p => p.id === projectId ? updatedProject : p));
+            if (selectedProject && selectedProject.id === projectId) {
+                setSelectedProject(updatedProject);
+            }
+            return updatedProject;
+        } catch (error) {
+            console.error("Error updating project:", error);
+            showNotification("Gagal memperbarui proyek.");
+        }
+        return null;
+    };
+
     const handleOpenBriefingModal = (project: Project) => {
         setSelectedProject(project);
-        const date = new Date(project.date).toLocaleDateString('id-ID', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric'
-        });
-    
-        const teamList = project.team.length > 0
-            ? project.team.map(t => `- ${t.name}`).join('\n')
-            : 'Tim belum ditugaskan.';
-    
-        const parts = [];
-        parts.push(`${date}`);
-        parts.push(`*${project.projectName}*`);
-        parts.push(`\n*Tim Bertugas:*\n${teamList}`);
-        
+        const date = new Date(project.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+        const teamList = project.team.length > 0 ? project.team.map(t => `- ${t.name}`).join('\n') : 'Tim belum ditugaskan.';
+        const parts = [ `${date}`, `*${project.projectName}*`, `\n*Tim Bertugas:*\n${teamList}`];
         if (project.startTime || project.endTime || project.location) parts.push(''); 
-    
         if (project.startTime) parts.push(`*Waktu Mulai:* ${project.startTime}`);
         if (project.endTime) parts.push(`*Waktu Selesai:* ${project.endTime}`);
         if (project.location) parts.push(`*Lokasi :* ${project.location}`);
-        
-        if (project.notes) {
-            parts.push('');
-            parts.push(`*Catatan:*\n${project.notes}`);
-        }
-    
+        if (project.notes) parts.push('', `*Catatan:*\n${project.notes}`);
         if (project.location || project.driveLink) parts.push('');
-    
-        if (project.location) {
-            const mapsQuery = encodeURIComponent(project.location);
-            const mapsLink = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
-            parts.push(`*Link Lokasi:*\n${mapsLink}`);
-        }
-    
-        if (project.driveLink) {
-             if (project.location) parts.push('');
-            parts.push(`*Link Moodboard:*\n${project.driveLink}`);
-        }
-
-        if (profile.briefingTemplate) {
-            parts.push('\n---\n');
-            parts.push(profile.briefingTemplate);
-        }
-
+        if (project.location) parts.push(`*Link Lokasi:*\nhttps://www.google.com/maps/search/?api=1&query=${encodeURIComponent(project.location)}`);
+        if (project.driveLink) { if (project.location) parts.push(''); parts.push(`*Link Moodboard:*\n${project.driveLink}`); }
+        if (profile.briefingTemplate) parts.push('\n---\n', profile.briefingTemplate);
         const text = parts.join('\n').replace(/\n\n\n+/g, '\n\n').trim();
-    
         setBriefingText(text);
         setWhatsappLink(`whatsapp://send?text=${encodeURIComponent(text)}`);
-        
         const toGoogleCalendarFormat = (date: Date) => date.toISOString().replace(/-|:|\.\d{3}/g, '');
         const timeRegex = /(\d{2}:\d{2})/;
         const startTimeMatch = project.startTime?.match(timeRegex);
         const endTimeMatch = project.endTime?.match(timeRegex);
-
-        let googleLink = '';
-        let icsContent = '';
-
+        let googleLink = ''; let icsContent = '';
         if (startTimeMatch) {
             const startDate = new Date(`${project.date}T${startTimeMatch[1]}:00`);
             const isInternalEvent = profile.eventTypes.includes(project.projectType);
             const durationHours = isInternalEvent ? 2 : 8;
-
-            const endDate = endTimeMatch 
-                ? new Date(`${project.date}T${endTimeMatch[1]}:00`)
-                : new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
-
+            const endDate = endTimeMatch ? new Date(`${project.date}T${endTimeMatch[1]}:00`) : new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
             const googleDates = `${toGoogleCalendarFormat(startDate)}/${toGoogleCalendarFormat(endDate)}`;
-            
             const calendarDescription = `Briefing untuk ${project.projectName}:\n\n${text}`;
-
             googleLink = `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(project.projectName)}&dates=${googleDates}&details=${encodeURIComponent(calendarDescription)}&location=${encodeURIComponent(project.location || '')}`;
-
             const icsDescription = calendarDescription.replace(/\n/g, '\\n');
-            icsContent = [
-                'BEGIN:VCALENDAR',
-                'VERSION:2.0',
-                'BEGIN:VEVENT',
-                `UID:${project.id}@venapictures.com`,
-                `DTSTAMP:${toGoogleCalendarFormat(new Date())}`,
-                `DTSTART:${toGoogleCalendarFormat(startDate)}`,
-                `DTEND:${toGoogleCalendarFormat(endDate)}`,
-                `SUMMARY:${project.projectName}`,
-                `DESCRIPTION:${icsDescription}`,
-                `LOCATION:${project.location || ''}`,
-                'END:VEVENT',
-                'END:VCALENDAR'
-            ].join('\n');
+            icsContent = [ 'BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', `UID:${project.id}@venapictures.com`, `DTSTAMP:${toGoogleCalendarFormat(new Date())}`, `DTSTART:${toGoogleCalendarFormat(startDate)}`, `DTEND:${toGoogleCalendarFormat(endDate)}`, `SUMMARY:${project.projectName}`, `DESCRIPTION:${icsDescription}`, `LOCATION:${project.location || ''}`, 'END:VEVENT', 'END:VCALENDAR' ].join('\n');
         }
-
         setGoogleCalendarLink(googleLink);
         setIcsDataUri(icsContent ? `data:text/calendar;charset=utf8,${encodeURIComponent(icsContent)}` : '');
-    
         setIsBriefingModalOpen(true);
     };
     
     const getProgressForStatus = (status: string, config: ProjectStatusConfig[]): number => {
-        const progressMap: { [key: string]: number } = {
-            'Tertunda': 0,
-            'Persiapan': 10,
-            'Dikonfirmasi': 25,
-            'Editing': 70,
-            'Revisi': 80,
-            'Cetak': 90,
-            'Dikirim': 95,
-            'Selesai': 100,
-            'Dibatalkan': 0,
-        };
+        const progressMap: { [key: string]: number } = { 'Tertunda': 0, 'Persiapan': 10, 'Dikonfirmasi': 25, 'Editing': 70, 'Revisi': 80, 'Cetak': 90, 'Dikirim': 95, 'Selesai': 100, 'Dibatalkan': 0 };
         return progressMap[status] ?? 0;
     };
 
@@ -1625,28 +1570,37 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setProjects, clien
         setDraggedProjectId(projectId);
     };
 
-    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-    };
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); };
 
-    const handleDrop = (e: React.DragEvent<HTMLDivElement>, newStatus: string) => {
+    const handleDrop = async (e: React.DragEvent<HTMLDivElement>, newStatus: string) => {
         e.preventDefault();
         const projectId = e.dataTransfer.getData("projectId");
         const projectToUpdate = projects.find(p => p.id === projectId);
-
-        if (projectToUpdate && projectToUpdate.status !== newStatus) {
-            setProjects(prevProjects =>
-                prevProjects.map(p =>
-                    p.id === projectId ? { ...p, status: newStatus, progress: getProgressForStatus(newStatus, profile.projectStatusConfig), activeSubStatuses: [] } : p
-                )
-            );
-            showNotification(`Status "${projectToUpdate.projectName}" diubah ke "${newStatus}"`);
-        }
         setDraggedProjectId(null);
+        if (projectToUpdate && projectToUpdate.status !== newStatus) {
+            const oldProject = { ...projectToUpdate };
+            const newProgress = getProgressForStatus(newStatus, profile.projectStatusConfig);
+            const updatedProjectData = { ...projectToUpdate, status: newStatus, progress: newProgress, activeSubStatuses: [] };
+            setProjects(prev => prev.map(p => p.id === projectId ? updatedProjectData : p));
+            try {
+                await handleUpdateProject(projectId, { status: newStatus, progress: newProgress, activeSubStatuses: [] });
+                showNotification(`Status "${projectToUpdate.projectName}" diubah ke "${newStatus}"`);
+            } catch (error) {
+                setProjects(prev => prev.map(p => p.id === projectId ? oldProject : p));
+            }
+        }
     };
     
     const handleOpenConfirmationModal = (project: Project, subStatus: SubStatusConfig, isFollowUp: boolean) => {
         setConfirmationModalState({ project, subStatus, isFollowUp });
+    };
+
+    const handleConfirmSubStatus = async (project: Partial<Project>) => {
+        if (!selectedProject) return;
+        const updatedProject = await handleUpdateProject(selectedProject.id, project);
+        if (updatedProject) {
+            setSelectedProject(updatedProject);
+        }
     };
 
     const handleCustomSubStatusChange = (index: number, field: 'name' | 'note', value: string) => {
@@ -1654,21 +1608,16 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setProjects, clien
             const newCustomSubStatuses = [...(prev.customSubStatuses || [])];
             const oldName = newCustomSubStatuses[index]?.name;
             newCustomSubStatuses[index] = { ...newCustomSubStatuses[index], [field]: value };
-    
             if (field === 'name' && oldName && (prev.activeSubStatuses || []).includes(oldName)) {
                 const newActiveSubStatuses = (prev.activeSubStatuses || []).map(name => name === oldName ? value : name);
                 return { ...prev, customSubStatuses: newCustomSubStatuses, activeSubStatuses: newActiveSubStatuses };
             }
-    
             return { ...prev, customSubStatuses: newCustomSubStatuses };
         });
     };
 
     const addCustomSubStatus = () => {
-        setFormData(prev => ({
-            ...prev,
-            customSubStatuses: [...(prev.customSubStatuses || []), { name: '', note: '' }]
-        }));
+        setFormData(prev => ({ ...prev, customSubStatuses: [...(prev.customSubStatuses || []), { name: '', note: '' }] }));
     };
 
     const removeCustomSubStatus = (index: number) => {
@@ -1676,19 +1625,24 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setProjects, clien
             const customSubStatuses = prev.customSubStatuses || [];
             const subStatusToRemove = customSubStatuses[index];
             const newCustomSubStatuses = customSubStatuses.filter((_, i) => i !== index);
-
             let newActiveSubStatuses = prev.activeSubStatuses || [];
             if (subStatusToRemove) {
                 newActiveSubStatuses = newActiveSubStatuses.filter(name => name !== subStatusToRemove.name);
             }
-
-            return {
-                ...prev,
-                customSubStatuses: newCustomSubStatuses,
-                activeSubStatuses: newActiveSubStatuses
-            };
+            return { ...prev, customSubStatuses: newCustomSubStatuses, activeSubStatuses: newActiveSubStatuses };
         });
     };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-accent mx-auto mb-4"></div>
+                    <p className="text-brand-text-secondary">Memuat data proyek...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-8">
@@ -1785,7 +1739,7 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setProjects, clien
                     clients={clients}
                     profile={profile}
                     showNotification={showNotification}
-                    setProjects={setProjects}
+                    onUpdateProject={handleUpdateProject}
                     onClose={() => setIsDetailModalOpen(false)}
                     handleOpenForm={handleOpenForm}
                     handleProjectDelete={handleProjectDelete}
@@ -1845,7 +1799,7 @@ export const Projects: React.FC<ProjectsProps> = ({ projects, setProjects, clien
                     isFollowUp={confirmationModalState.isFollowUp}
                     clients={clients}
                     teamMembers={teamMembers}
-                    setProjects={setProjects}
+                    onConfirm={(updates) => handleUpdateProject(confirmationModalState.project.id, updates)}
                     onClose={() => setConfirmationModalState(null)}
                 />
             )}

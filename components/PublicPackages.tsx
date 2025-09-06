@@ -25,19 +25,8 @@ const UploadIcon = (props: React.SVGProps<SVGSVGElement>) => (
 );
 
 interface PublicPackagesProps {
-    packages: Package[];
-    addOns: AddOn[];
-    userProfile: Profile;
     showNotification: (message: string) => void;
-    setClients: React.Dispatch<React.SetStateAction<Client[]>>;
-    setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
-    setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
-    setCards: React.Dispatch<React.SetStateAction<Card[]>>;
-    setLeads: React.Dispatch<React.SetStateAction<Lead[]>>;
     addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'isRead'>) => void;
-    cards: Card[];
-    promoCodes: PromoCode[];
-    setPromoCodes: React.Dispatch<React.SetStateAction<PromoCode[]>>;
 }
 
 
@@ -55,7 +44,44 @@ const initialForm = {
 };
 
 
-const PublicPackages: React.FC<PublicPackagesProps> = ({ packages, addOns, userProfile, showNotification, setClients, setProjects, setTransactions, setCards, setLeads, addNotification, cards, promoCodes, setPromoCodes }) => {
+const PublicPackages: React.FC<PublicPackagesProps> = ({ showNotification, addNotification }) => {
+    const [packages, setPackages] = useState<Package[]>([]);
+    const [addOns, setAddOns] = useState<AddOn[]>([]);
+    const [userProfile, setUserProfile] = useState<Profile | null>(null);
+    const [cards, setCards] = useState<Card[]>([]);
+    const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const [
+                    packagesData,
+                    addOnsData,
+                    profileData,
+                    cardsData,
+                    promoCodesData,
+                ] = await Promise.all([
+                    SupabaseService.getPackages(),
+                    SupabaseService.getAddOns(),
+                    SupabaseService.getProfile(),
+                    SupabaseService.getCards(),
+                    SupabaseService.getPromoCodes(),
+                ]);
+                setPackages(packagesData);
+                setAddOns(addOnsData);
+                setUserProfile(profileData[0] || null);
+                setCards(cardsData);
+                setPromoCodes(promoCodesData);
+            } catch (error) {
+                console.error("Error fetching public packages data:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
     const { publicPageConfig } = userProfile;
     const template = publicPageConfig.template || 'modern';
     
@@ -71,6 +97,19 @@ const PublicPackages: React.FC<PublicPackagesProps> = ({ packages, addOns, userP
     const [isTermsOpen, setIsTermsOpen] = useState(false);
     const [viewingImage, setViewingImage] = useState<string | null>(null);
 
+    if (loading || !userProfile) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="text-center">
+                    <svg className="animate-spin h-10 w-10 text-brand-accent mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="mt-4 text-brand-text-secondary">Memuat paket...</p>
+                </div>
+            </div>
+        );
+    }
 
     const ChevronDownIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -311,95 +350,49 @@ const PublicPackages: React.FC<PublicPackagesProps> = ({ packages, addOns, userP
         
         try {
             const selectedAddOns = addOns.filter(addon => formData.selectedAddOnIds.includes(addon.id));
-            const remainingPayment = totalProject - dpAmount;
             const transportFee = Number(formData.transportCost) || 0;
 
-            // 1. Create Client in Supabase
-            const newClientData: Omit<Client, 'id'> = {
-                name: formData.clientName, 
-                email: formData.email, 
-                phone: formData.phone, 
-                instagram: formData.instagram,
-                since: new Date().toISOString().split('T')[0], 
-                status: ClientStatus.ACTIVE, 
-                clientType: ClientType.DIRECT,
-                lastContact: new Date().toISOString(), 
-                portalAccessId: crypto.randomUUID(),
+            const newClientData = {
+                name: formData.clientName, email: formData.email, phone: formData.phone, instagram: formData.instagram,
+                since: new Date().toISOString().split('T')[0], status: ClientStatus.ACTIVE, clientType: ClientType.DIRECT,
+                lastContact: new Date().toISOString(), portalAccessId: crypto.randomUUID(),
             };
             const createdClient = await SupabaseService.createClient(newClientData);
 
-            // 2. Create Project in Supabase
-            const newProjectData: Omit<Project, 'id'> = {
-                projectName: `Acara ${formData.clientName} (${bookingModal.pkg.name})`,
-                clientName: createdClient.name, 
-                clientId: createdClient.id, 
-                projectType: bookingModal.pkg.category,
-                packageName: bookingModal.pkg.name, 
-                packageId: bookingModal.pkg.id, 
-                addOns: selectedAddOns,
-                date: formData.date,
-                location: formData.location || 'Akan dikonfirmasi',
-                progress: 0, 
-                status: 'Dikonfirmasi',
-                bookingStatus: BookingStatus.BARU, 
-                totalCost: totalProject, 
-                amountPaid: dpAmount,
+            const newProjectData = {
+                projectName: `Acara ${formData.clientName} (${bookingModal.pkg.name})`, clientName: createdClient.name, clientId: createdClient.id,
+                projectType: bookingModal.pkg.category, packageName: bookingModal.pkg.name, packageId: bookingModal.pkg.id, addOns: selectedAddOns,
+                date: formData.date, location: formData.location || 'Akan dikonfirmasi', progress: 0, status: 'Dikonfirmasi',
+                bookingStatus: BookingStatus.BARU, totalCost: totalProject, amountPaid: dpAmount,
                 paymentStatus: dpAmount >= totalProject ? PaymentStatus.LUNAS : (dpAmount > 0 ? PaymentStatus.DP_TERBAYAR : PaymentStatus.BELUM_BAYAR),
-                team: [], 
-                notes: `Booking dari halaman paket. Ref: ${formData.dpPaymentRef}`, 
-                dpProofUrl: dpProofUrl || undefined,
-                promoCodeId: promoCodeAppliedId, 
-                discountAmount: discountAmount > 0 ? discountAmount : undefined,
-                transportCost: transportFee > 0 ? transportFee : undefined,
+                team: [], notes: `Booking dari halaman paket. Ref: ${formData.dpPaymentRef}`, dpProofUrl: dpProofUrl || undefined,
+                promoCodeId: promoCodeAppliedId, discountAmount: discountAmount > 0 ? discountAmount : undefined, transportCost: transportFee > 0 ? transportFee : undefined,
             };
             const createdProject = await SupabaseService.createProject(newProjectData);
             
-            // 3. Create Lead in Supabase
-            const newLeadData: Omit<Lead, 'id'> = {
-                name: createdClient.name, 
-                contactChannel: ContactChannel.WEBSITE,
-                location: 'Akan dikonfirmasi', 
-                status: LeadStatus.CONVERTED, 
-                date: new Date().toISOString(),
+            const newLeadData = {
+                name: createdClient.name, contactChannel: ContactChannel.WEBSITE, location: 'Akan dikonfirmasi',
+                status: LeadStatus.CONVERTED, date: new Date().toISOString(),
                 notes: `Dikonversi dari halaman paket. Proyek: ${createdProject.projectName}. Klien ID: ${createdClient.id}`
             };
-            const createdLead = await SupabaseService.createLead(newLeadData);
+            await SupabaseService.createLead(newLeadData);
 
-            // 4. Update promo code usage if applicable
             if (promoCodeAppliedId) {
                 const promoCode = promoCodes.find(p => p.id === promoCodeAppliedId);
                 if (promoCode) {
                     await SupabaseService.updatePromoCode(promoCodeAppliedId, { usageCount: promoCode.usageCount + 1 });
-                    setPromoCodes(prev => prev.map(p => p.id === promoCodeAppliedId ? { ...p, usageCount: p.usageCount + 1 } : p));
                 }
             }
 
-            // 5. Create Transaction and update Card if DP > 0
             if (dpAmount > 0) {
-                const newTransactionData: Omit<Transaction, 'id'> = {
-                    date: new Date().toISOString().split('T')[0], 
-                    description: `DP Proyek ${createdProject.projectName}`,
-                    amount: dpAmount, 
-                    type: TransactionType.INCOME, 
-                    projectId: createdProject.id, 
-                    category: 'DP Proyek',
-                    method: 'Transfer Bank', 
-                    cardId: destinationCard.id,
+                const newTransactionData = {
+                    date: new Date().toISOString().split('T')[0], description: `DP Proyek ${createdProject.projectName}`,
+                    amount: dpAmount, type: TransactionType.INCOME, projectId: createdProject.id, category: 'DP Proyek',
+                    method: 'Transfer Bank', cardId: destinationCard.id,
                 };
-                const createdTransaction = await SupabaseService.createTransaction(newTransactionData);
-                
-                // Update card balance
+                await SupabaseService.createTransaction(newTransactionData);
                 await SupabaseService.updateCard(destinationCard.id, { balance: destinationCard.balance + dpAmount });
-                
-                // Update local state
-                setTransactions(prev => [createdTransaction, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-                setCards(prev => prev.map(c => c.id === destinationCard.id ? { ...c, balance: c.balance + dpAmount } : c));
             }
-
-            // Update local state
-            setClients(prev => [createdClient, ...prev]);
-            setProjects(prev => [createdProject, ...prev]);
-            setLeads(prev => [createdLead, ...prev]);
 
             addNotification({
                 title: 'Booking Baru Diterima!',
